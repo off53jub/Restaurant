@@ -1,0 +1,51 @@
+name: Monthly DB refresh
+
+# 月次でDBを再構築するクラウド版cron（ローカル運用が難しい場合の代替）。
+# DBは永続ディスクが無いため、ビルド成果物として Artifact に保存する。
+# 必要に応じて Release アセットや外部ストレージ(S3等)へ載せ替えてください。
+
+on:
+  schedule:
+    - cron: "0 19 1 * *"   # 毎月1日 04:00 JST (= 前日19:00 UTC)
+  workflow_dispatch: {}      # 手動実行も可
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 600     # enrichは数時間かかるため上限を引き上げ
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      # 前回の成果物DBを復元（差分enrichを効かせるため）。無ければ新規構築。
+      - name: Restore previous DB
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: shops-db
+          path: db
+
+      - name: Ingest (23 wards)
+        env:
+          HOTPEPPER_API_KEY: ${{ secrets.HOTPEPPER_API_KEY }}
+        run: .venv/bin/python ingest.py --db db/shops.db
+
+      - name: Enrich (new + stale only)
+        env:
+          HOTPEPPER_API_KEY: ${{ secrets.HOTPEPPER_API_KEY }}
+        run: .venv/bin/python enrich_db.py --db db/shops.db --concurrency 12 --delay 0.3
+
+      - name: Upload DB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shops-db
+          path: db/shops.db
+          retention-days: 90

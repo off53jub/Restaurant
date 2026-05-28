@@ -89,6 +89,100 @@ python3 enrich.py --input output/shops.json --concurrency 8  # 並列数
 | 4 | 2km |
 | 5 | 3km (default, タクシー10分相当) |
 
+## 東京23区データベース版（db.py / ingest.py / enrich_db.py / query.py）
+
+毎回APIを叩く代わりに、**23区全域の店舗をSQLiteに貯めて何度でも高速検索**するモード。
+
+```
+ingest.py  → HotPepper APIで23区の店舗を取得し shops テーブルに UPSERT
+enrich_db.py → 未enrich/期限切れの店だけページ取得して judgements に UPSERT
+query.py   → プリセット or アドホック条件 + FTS全文検索で抽出
+```
+
+### 初回構築
+
+```bash
+make install          # venv作成 + 依存インストール
+make ingest           # 23区44中心からAPI取得（数分、約28,000店 / 約130MB）
+make enrich           # 全店のページ取得・判定（数時間、80店/分程度）
+```
+
+`enrich_db.py` は50件ごとにDBコミットし、対象を「judgements未作成 or `--max-age-days`日より古い」で選ぶため、**中断しても `make enrich` 再実行でレジューム**できます。
+
+### 検索
+
+```bash
+make list                                    # プリセット一覧
+python3 query.py --preset kaishoku           # 役員会食（虎ノ門圏）
+python3 query.py --preset date_shinjuku --limit 10
+python3 query.py --preset instagram_shinjuku
+
+# アドホック（プリセット非依存）
+python3 query.py --area 銀座 --area 新橋 --price-min 5000 --price-max 8000 \
+                 --fully-private --calm-min 60 --limit 20
+
+# FTS全文検索（名前・住所・アクセス・キャッチ）
+python3 query.py --fts "個室 AND 銀座" --price-min 6000 --price-max 10000
+```
+
+プリセットは `filter.py` の `PRESETS` 辞書に1エントリ追加するだけで増やせます。
+
+### 月次メンテナンス
+
+店舗の開店/閉店/コース改定はHotPepper側で随時起きるため、月1回の再取得を推奨。
+
+```bash
+make refresh   # ingest（全店再fetch・last_seen_at更新） → enrich（30日超のみ再判定）
+```
+
+閉店検知は `shops.last_seen_at` が最新ingestより古い店を抽出すれば可能：
+
+```sql
+SELECT name, address, last_seen_at FROM shops
+WHERE last_seen_at < (SELECT MAX(last_seen_at) FROM shops);
+```
+
+#### 自動実行（ローカル推奨）
+
+DBは永続ディスクに置くのが前提なので、運用はローカルマシンか常時起動VPSが向いています。
+
+**cron（Linux）** — 毎月1日 午前4時:
+
+```cron
+0 4 1 * * cd /path/to/Restaurant && make refresh >> refresh.log 2>&1
+```
+
+**launchd（macOS）** — `~/Library/LaunchAgents/com.restaurant.refresh.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.restaurant.refresh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>-c</string>
+    <string>cd /path/to/Restaurant && make refresh >> refresh.log 2>&1</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Day</key><integer>1</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+</dict></plist>
+```
+`launchctl load ~/Library/LaunchAgents/com.restaurant.refresh.plist` で登録。
+
+**systemd timer（Linux）** — `restaurant-refresh.service` + `restaurant-refresh.timer`（`OnCalendar=*-*-01 04:00:00`）。
+
+### スキーマ
+
+| テーブル | 役割 |
+|---|---|
+| `shops` | 店マスタ。API生JSON(`raw_json`)、`first_seen_at`/`last_seen_at`/`fetched_at` |
+| `judgements` | enrich結果。価格・個室・会食/インスタスコア・雰囲気・`enriched_at` |
+| `shops_fts` | FTS5全文検索（name/kana/address/access/catch、トリガで自動同期） |
+| `ingest_runs` | ingest履歴（新規/更新件数） |
+
+DBファイル（`db/`, `*.db`）は `.gitignore` 済み。サイズが大きくバージョン管理に不向きなため、リポジトリはコード管理に専念し、DB本体はローカル/外部ストレージに置く方針。
+
 ## API
 
 [ホットペッパーグルメサーチAPI](https://webservice.recruit.co.jp/doc/hotpepper/reference.html)
