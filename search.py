@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""虎ノ門エリアの飲食店検索CLI。ホットペッパーグルメAPIを利用。
+"""虎ノ門エリアの会食向け飲食店検索CLI。ホットペッパーグルメАПIを利用。
 
 条件:
-  - 指定座標から半径2km
+  - 指定座標から半径3km（タクシー10分相当、--rangeで変更可）
   - 個室あり
-  - 飲み放題あり
+  - 飲み放題あり（--no-free-drinkで条件解除）
   - 予算8800円以下（ディナー平均予算ベース、後段でコース確認推奨）
 """
 import argparse
@@ -28,7 +28,7 @@ TORANOMON_LNG = 139.7497
 RANGE_LABEL = {1: "300m", 2: "500m", 3: "1km", 4: "2km", 5: "3km"}
 
 
-def fetch_all(api_key, lat, lng, range_code):
+def fetch_all(api_key, lat, lng, range_code, require_free_drink=True):
     """ページングしながら全件取得。"""
     shops = []
     start = 1
@@ -40,11 +40,12 @@ def fetch_all(api_key, lat, lng, range_code):
             "lng": lng,
             "range": range_code,
             "private_room": 1,
-            "free_drink": 1,
             "count": count,
             "start": start,
             "format": "json",
         }
+        if require_free_drink:
+            params["free_drink"] = 1
         resp = requests.get(API_URL, params=params, timeout=30)
         resp.raise_for_status()
         results = resp.json().get("results", {})
@@ -101,17 +102,22 @@ def format_shop(s):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="虎ノ門2km圏 個室＋飲み放題 レストラン検索")
+    ap = argparse.ArgumentParser(description="虎ノ門3km圏 個室レストラン検索（会食向け）")
     ap.add_argument("--lat", type=float, default=TORANOMON_LAT)
     ap.add_argument("--lng", type=float, default=TORANOMON_LNG)
     ap.add_argument(
         "--range",
         type=int,
-        default=4,
+        default=5,
         choices=[1, 2, 3, 4, 5],
-        help="1=300m 2=500m 3=1km 4=2km 5=3km (default: 4)",
+        help="1=300m 2=500m 3=1km 4=2km 5=3km (default: 5, タクシー10分相当)",
     )
     ap.add_argument("--max-budget", type=int, default=8800, help="円 (default: 8800)")
+    ap.add_argument(
+        "--no-free-drink",
+        action="store_true",
+        help="飲み放題条件を外す（役員会食ではコース＋単品ワインのことも多い）",
+    )
     ap.add_argument("--save-json", type=str, help="生レスポンスをJSON保存")
     ap.add_argument("--format", choices=["text", "json", "tsv"], default="text")
     args = ap.parse_args()
@@ -121,12 +127,16 @@ def main():
         print("ERROR: HOTPEPPER_API_KEY が .env に設定されていません", file=sys.stderr)
         sys.exit(1)
 
+    free_drink_label = "" if args.no_free_drink else "・飲み放題あり"
     print(
         f"検索: ({args.lat}, {args.lng}) 半径{RANGE_LABEL[args.range]} / "
-        f"個室・飲み放題あり / 予算{args.max_budget}円以下",
+        f"個室{free_drink_label} / 予算{args.max_budget}円以下",
         file=sys.stderr,
     )
-    shops = fetch_all(api_key, args.lat, args.lng, args.range)
+    shops = fetch_all(
+        api_key, args.lat, args.lng, args.range,
+        require_free_drink=not args.no_free_drink,
+    )
     print(f"API取得合計: {len(shops)}件", file=sys.stderr)
 
     if args.save_json:
