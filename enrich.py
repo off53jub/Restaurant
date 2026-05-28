@@ -70,6 +70,14 @@ KAISHOKU_KEYWORDS = [
     "大人の", "隠れ家", "VIP",
 ]
 
+# インスタ映え・フォトジェニック系キーワード
+INSTAGRAM_KEYWORDS = [
+    "フォトジェニック", "インスタ映え", "SNS映え", "映える",
+    "夜景", "絶景", "テラス", "非日常", "おしゃれ",
+    "スタイリッシュ", "アート", "ロケーション", "フォト",
+    "空間", "内装", "デザイン", "ビュー",
+]
+
 # 5〜8名対応の中規模個室
 MID_ROOM_PATTERNS = [
     r"[5-8]\s*[名人]様?用?個室",
@@ -98,6 +106,8 @@ class Judgement:
     mid_room_evidence: str = ""
     atmosphere_calm: Optional[int] = None   # 0=にぎやか … 100=落ち着いた
     atmosphere_special: Optional[int] = None  # 0=普段使い … 100=特別な日
+    instagram_score: int = 0
+    instagram_hits: list = field(default_factory=list)
     fetch_error: Optional[str] = None
 
 
@@ -159,6 +169,15 @@ def detect_kaishoku(text):
     """会食適性キーワードのヒット数とヒット内容を返す。"""
     hits = []
     for kw in KAISHOKU_KEYWORDS:
+        if kw in text:
+            hits.append(kw)
+    return len(hits), hits
+
+
+def detect_instagram(text):
+    """インスタ映え系キーワードのヒット数とヒット内容を返す。"""
+    hits = []
+    for kw in INSTAGRAM_KEYWORDS:
         if kw in text:
             hits.append(kw)
     return len(hits), hits
@@ -273,6 +292,11 @@ def judge_shop(shop, delay=0.5):
     # 雰囲気スライダー（トップページのみに存在）
     j.atmosphere_calm, j.atmosphere_special = extract_atmosphere(top_html)
 
+    # インスタ映え
+    ig_score, ig_hits = detect_instagram(combined)
+    j.instagram_score = ig_score
+    j.instagram_hits = ig_hits
+
     return j
 
 
@@ -330,6 +354,8 @@ def format_result(shop, judgement):
         f"{(' [' + judgement.mid_room_evidence + ']') if judgement.mid_room_evidence else ''}\n"
         f"  会食適性:   スコア{judgement.kaishoku_score}"
         f"{(' [' + ', '.join(judgement.kaishoku_hits[:5]) + ']') if judgement.kaishoku_hits else ''}\n"
+        f"  インスタ映え: スコア{judgement.instagram_score}"
+        f"{(' [' + ', '.join(judgement.instagram_hits[:5]) + ']') if judgement.instagram_hits else ''}\n"
         f"  雰囲気:     落ち着いた={judgement.atmosphere_calm if judgement.atmosphere_calm is not None else '?'}/100"
         f"  特別な日={judgement.atmosphere_special if judgement.atmosphere_special is not None else '?'}/100\n"
         f"  喫煙:       {smoke_label}"
@@ -379,7 +405,7 @@ def main():
             print(
                 f"  [{len(enriched)}/{len(shops)}] {s.get('name', '')[:30]} "
                 f"min={j.drink_course_min_yen} private={j.fully_private_room} "
-                f"calm={j.atmosphere_calm} special={j.atmosphere_special} smoke={j.smoking_at_seat}",
+                f"calm={j.atmosphere_calm} special={j.atmosphere_special} ig={j.instagram_score} smoke={j.smoking_at_seat}",
                 file=sys.stderr,
             )
 

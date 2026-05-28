@@ -33,6 +33,20 @@ PRESETS = {
         "atmosphere_special_min": None,
         "sort": "atmosphere",            # "atmosphere" / "score" / "price"
     },
+    # インスタ映えデート（新宿圏）— フォトジェニック重視
+    "instagram_shinjuku": {
+        "description": "新宿3km / インスタ映えデート / 5,000-8,000円 / 半個室OK",
+        "area_keywords": CORE_SHINJUKU,
+        "require_fully_private": False,
+        "require_mid_room": False,
+        "smoking": "any",
+        "price_min": 5000,
+        "price_max": 8000,
+        "atmosphere_calm_min": None,
+        "atmosphere_special_min": None,
+        "instagram_score_min": 4,
+        "sort": "instagram",
+    },
     # デート（新宿圏）— 落ち着いた大人デート / 5,000-8,000円 / 半個室OK
     "date_shinjuku": {
         "description": "新宿3km / 落ち着いた大人デート / 5,000-8,000円 / 半個室OK",
@@ -74,6 +88,9 @@ def matches(j, s, preset):
     if preset.get("atmosphere_special_min") is not None:
         if (j.get("atmosphere_special") or 0) < preset["atmosphere_special_min"]:
             return False, None
+    if preset.get("instagram_score_min") is not None:
+        if (j.get("instagram_score") or 0) < preset["instagram_score_min"]:
+            return False, None
     return True, (area, band)
 
 
@@ -86,6 +103,10 @@ def sort_key(item, mode):
                 min(band))
     if mode == "score":
         return (-j.get("kaishoku_score", 0), min(band))
+    if mode == "instagram":
+        return (-(j.get("instagram_score") or 0),
+                -(j.get("atmosphere_special") or 0),
+                min(band))
     return (min(band),)
 
 
@@ -117,6 +138,7 @@ def format_shop(idx, s, j, area, band):
         f" / 5-8名個室{'○' if j.get('mid_room_ok') else '?'}"
         f" {('['+j.get('mid_room_evidence','')+']') if j.get('mid_room_evidence') else ''}",
         f"   喫煙     : {smoke_label}",
+        f"   インスタ  : スコア{j.get('instagram_score',0)} [{', '.join(j.get('instagram_hits',[])[:6])}]",
         f"   会食適性 : {', '.join(j.get('kaishoku_hits',[])[:6])}",
         f"   URL      : {s.get('urls',{}).get('pc','')}",
     ])
