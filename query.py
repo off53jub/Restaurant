@@ -184,6 +184,7 @@ def main():
         special_min=args.special_min,
         ig_min=args.ig_min,
     )
+    total = len(rows)
     if args.limit > 0:
         rows = rows[: args.limit]
 
@@ -191,7 +192,10 @@ def main():
         print(f"# プリセット: {args.preset} — {preset['description']}")
     else:
         print(f"# アドホッククエリ")
-    print(f"# 該当: {len(rows)}件\n")
+    if args.limit > 0 and total > len(rows):
+        print(f"# 該当: {total}件（上位{len(rows)}件を表示）\n")
+    else:
+        print(f"# 該当: {total}件\n")
     print("=" * 80)
     for i, r in enumerate(rows, 1):
         print(format_row(i, r, price_band))
