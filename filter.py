@@ -44,7 +44,7 @@ PRESETS = {
         "price_max": 8000,
         "atmosphere_calm_min": None,
         "atmosphere_special_min": None,
-        "instagram_score_min": 4,
+        "instagram_score_min": 6,
         "sort": "instagram",
     },
     # デート（新宿圏）— 落ち着いた大人デート / 5,000-8,000円 / 半個室OK
