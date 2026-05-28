@@ -96,6 +96,8 @@ class Judgement:
     kaishoku_hits: list = field(default_factory=list)
     mid_room_ok: Optional[bool] = None  # 5-8名個室の明記
     mid_room_evidence: str = ""
+    atmosphere_calm: Optional[int] = None   # 0=にぎやか … 100=落ち着いた
+    atmosphere_special: Optional[int] = None  # 0=普段使い … 100=特別な日
     fetch_error: Optional[str] = None
 
 
@@ -195,6 +197,23 @@ def detect_fully_private(text):
     return None, ""
 
 
+def extract_atmosphere(html):
+    """atmosphereWrap の range input から (calm, special) を返す。None は取得失敗。
+    calm:    0=にぎやか … 100=落ち着いた
+    special: 0=普段使い … 100=特別な日
+    """
+    if not html or html.startswith("__ERROR__"):
+        return None, None
+    soup = BeautifulSoup(html, "html.parser")
+    wrap = soup.find(class_="atmosphereWrap")
+    if not wrap:
+        return None, None
+    sliders = wrap.find_all("input", {"type": "range"})
+    calm = int(sliders[0]["value"]) if len(sliders) > 0 else None
+    special = int(sliders[1]["value"]) if len(sliders) > 1 else None
+    return calm, special
+
+
 def judge_shop(shop, delay=0.5):
     """1店舗の判定を行う。"""
     pc_url = shop.get("urls", {}).get("pc", "")
@@ -250,6 +269,9 @@ def judge_shop(shop, delay=0.5):
     mid_ok, mid_ev = detect_mid_room(combined)
     j.mid_room_ok = mid_ok
     j.mid_room_evidence = mid_ev
+
+    # 雰囲気スライダー（トップページのみに存在）
+    j.atmosphere_calm, j.atmosphere_special = extract_atmosphere(top_html)
 
     return j
 
@@ -308,6 +330,8 @@ def format_result(shop, judgement):
         f"{(' [' + judgement.mid_room_evidence + ']') if judgement.mid_room_evidence else ''}\n"
         f"  会食適性:   スコア{judgement.kaishoku_score}"
         f"{(' [' + ', '.join(judgement.kaishoku_hits[:5]) + ']') if judgement.kaishoku_hits else ''}\n"
+        f"  雰囲気:     落ち着いた={judgement.atmosphere_calm if judgement.atmosphere_calm is not None else '?'}/100"
+        f"  特別な日={judgement.atmosphere_special if judgement.atmosphere_special is not None else '?'}/100\n"
         f"  喫煙:       {smoke_label}"
         f"{(' [' + judgement.smoking_evidence + ']') if judgement.smoking_evidence else ''}\n"
         f"  URL:        {shop.get('urls', {}).get('pc', '')}\n"
@@ -354,7 +378,8 @@ def main():
             enriched.append({"shop": s, "judgement": asdict(j)})
             print(
                 f"  [{len(enriched)}/{len(shops)}] {s.get('name', '')[:30]} "
-                f"min={j.drink_course_min_yen} private={j.fully_private_room} smoke={j.smoking_at_seat}",
+                f"min={j.drink_course_min_yen} private={j.fully_private_room} "
+                f"calm={j.atmosphere_calm} special={j.atmosphere_special} smoke={j.smoking_at_seat}",
                 file=sys.stderr,
             )
 
