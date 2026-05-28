@@ -89,6 +89,7 @@ def main():
         return
 
     done = 0
+    errors = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as ex:
         futures = {}
         for row in targets:
@@ -101,19 +102,23 @@ def main():
                 j = fut.result()
             except Exception as e:
                 j = Judgement(fetch_error=f"{type(e).__name__}: {e}")
+            if j.fetch_error:
+                errors += 1
             now = dt.datetime.now(dt.timezone.utc).isoformat()
             upsert_judgement(conn, row["id"], j, now)
             done += 1
             if done % 50 == 0 or done == len(targets):
                 conn.commit()
+                err_rate = errors / done * 100
                 print(
-                    f"  [{done}/{len(targets)}] {row['name'][:30]} "
+                    f"  [{done}/{len(targets)}] err={errors}({err_rate:.0f}%) "
+                    f"{row['name'][:24]} "
                     f"min={j.drink_course_min_yen} private={j.fully_private_room} "
                     f"calm={j.atmosphere_calm} ig={j.instagram_score}",
                     file=sys.stderr,
                 )
     conn.commit()
-    print("\n=== enrich 完了 ===", file=sys.stderr)
+    print(f"\n=== enrich 完了 (err {errors}/{done}) ===", file=sys.stderr)
 
 
 if __name__ == "__main__":
