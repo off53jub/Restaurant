@@ -63,6 +63,13 @@ def card_html(idx, r, price_band, scene, nijikai_cands=None):
     all_str = " / ".join(f"{p:,}円" for p in drink_prices[:6]) or "—"
     fit = row_fit(r, scene, price_band)
     fit_badge = f'<div class="fit">{fit}</div>' if fit is not None else ""
+    g_rating = g_reviews = None
+    try:
+        g_rating = r["google_rating"]; g_reviews = r["google_reviews"]
+    except (IndexError, KeyError):
+        pass
+    google_html = (f'<div class="google">G★{g_rating} <small>({g_reviews}件)</small></div>'
+                   if g_rating is not None else "")
     img = photo_url(r["raw_json"])
     img_html = (f'<img loading="lazy" src="{e(img)}" alt="">' if img
                 else '<div class="noimg">No Photo</div>')
@@ -76,7 +83,8 @@ def card_html(idx, r, price_band, scene, nijikai_cands=None):
   <div class="thumb">{img_html}{fit_badge}</div>
   <div class="body">
     <h3><span class="rank">{idx}</span>
-        <a href="{e(r['pc_url'])}" target="_blank" rel="noopener">{e(r['name'])}</a></h3>
+        <a href="{e(r['pc_url'])}" target="_blank" rel="noopener">{e(r['name'])}</a>
+        {google_html}</h3>
     <div class="meta">{e(r['genre_name'])}・{e(r['address'])}</div>
     <div class="meta small">{e(r['access'] or '')}</div>
     {atm_bar('落ち着き', r['atmosphere_calm'])}
@@ -152,6 +160,8 @@ def build_html(rows, title, price_band, scene, conn=None, nijikai_opts=None):
  .nk-item{{display:block;padding:5px 7px;background:#fafafa;border:1px solid #eee;border-radius:6px;margin-bottom:4px;text-decoration:none;color:#222}}
  .nk-item:hover{{background:#f0f0f0}} .nk-item b{{font-size:12px}}
  .nk-meta{{display:block;color:var(--mut);font-size:10.5px;margin-top:1px}}
+ .google{{display:inline-block;background:#fff8e1;color:#b8860b;border:1px solid #ffd54f;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;margin-left:6px;vertical-align:middle}}
+ .google small{{color:#999;font-weight:400}}
 </style></head><body>
 <header><h1>{html.escape(title)}</h1><div class="sub">{len(rows)}件 ・ 適合度＝シーン複合スコア ・ ピンクリックでカードへ</div></header>
 <div id="map"></div>

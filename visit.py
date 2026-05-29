@@ -92,6 +92,137 @@ def pick_shop_id(conn, args):
     raise SystemExit("--shop-id, --search, --manual のいずれかが必要")
 
 
+def cmd_stats(conn, args):
+    """訪問記録の集計ダッシュボード。"""
+    total = conn.execute("SELECT COUNT(*) FROM visits").fetchone()[0]
+    if total == 0:
+        print("訪問記録がまだありません")
+        return
+
+    # 年別件数
+    by_year = list(conn.execute(
+        "SELECT substr(visited_at,1,4) AS y, COUNT(*) n FROM visits GROUP BY y ORDER BY y DESC"
+    ))
+    # 月別件数（直近12ヶ月）
+    by_month = list(conn.execute(
+        "SELECT substr(visited_at,1,7) AS m, COUNT(*) n FROM visits "
+        "GROUP BY m ORDER BY m DESC LIMIT 12"
+    ))
+    # 評価分布
+    by_rating = dict(conn.execute(
+        "SELECT rating, COUNT(*) FROM visits WHERE rating IS NOT NULL GROUP BY rating"
+    ))
+    rated = sum(by_rating.values())
+    avg_rating = (sum(k * v for k, v in by_rating.items()) / rated) if rated else None
+    # シーン分布
+    by_scene = list(conn.execute(
+        "SELECT scene, COUNT(*) n FROM visits WHERE scene IS NOT NULL "
+        "GROUP BY scene ORDER BY n DESC"
+    ))
+    # ジャンル分布（DB内のみ）
+    by_genre = list(conn.execute(
+        "SELECT s.genre_name g, COUNT(*) n FROM visits v "
+        "JOIN shops s ON s.id = v.shop_id GROUP BY g ORDER BY n DESC LIMIT 10"
+    ))
+    # エリア分布（区別、住所から）
+    import re
+    addrs = conn.execute(
+        "SELECT COALESCE(s.address, v.manual_address) FROM visits v "
+        "LEFT JOIN shops s ON s.id = v.shop_id"
+    ).fetchall()
+    ward_re = re.compile(r"(千代田区|中央区|港区|新宿区|文京区|台東区|墨田区|江東区|品川区|"
+                         r"目黒区|大田区|世田谷区|渋谷区|中野区|杉並区|豊島区|北区|荒川区|"
+                         r"板橋区|練馬区|足立区|葛飾区|江戸川区)")
+    from collections import Counter
+    ward_cnt = Counter()
+    for (a,) in addrs:
+        m = ward_re.search(a or "")
+        ward_cnt[m.group(1) if m else "都外/不明"] += 1
+    # 同一店リピート（再訪上位）
+    repeats = list(conn.execute(
+        "SELECT COALESCE(s.name, v.manual_name) name, COUNT(*) n "
+        "FROM visits v LEFT JOIN shops s ON s.id = v.shop_id "
+        "GROUP BY COALESCE(v.shop_id, v.manual_name) "
+        "HAVING n > 1 ORDER BY n DESC LIMIT 10"
+    ))
+    # タグ頻度
+    tag_cnt = Counter()
+    for (t,) in conn.execute("SELECT tags FROM visits WHERE tags IS NOT NULL"):
+        for tag in (t or "").split(","):
+            tag = tag.strip()
+            if tag:
+                tag_cnt[tag] += 1
+    # 平均コスト（シーン別）
+    cost_by_scene = list(conn.execute(
+        "SELECT scene, AVG(cost_per_person), COUNT(cost_per_person) FROM visits "
+        "WHERE cost_per_person IS NOT NULL GROUP BY scene ORDER BY scene"
+    ))
+    # 再訪意思率
+    revisit = conn.execute(
+        "SELECT AVG(CASE WHEN would_revisit=1 THEN 1.0 ELSE 0 END) "
+        "FROM visits WHERE would_revisit IS NOT NULL"
+    ).fetchone()[0]
+
+    payload = {
+        "total": total,
+        "average_rating": round(avg_rating, 2) if avg_rating else None,
+        "by_year": [{"year": y, "count": n} for y, n in by_year],
+        "by_month_recent12": [{"month": m, "count": n} for m, n in by_month],
+        "by_rating": {str(k): v for k, v in sorted(by_rating.items(), reverse=True)},
+        "by_scene": [{"scene": s, "count": n} for s, n in by_scene],
+        "by_genre_top10": [{"genre": g, "count": n} for g, n in by_genre],
+        "by_ward": [{"ward": w, "count": n} for w, n in ward_cnt.most_common()],
+        "repeated_shops": [{"name": n, "visits": c} for n, c in repeats],
+        "top_tags": [{"tag": t, "count": n} for t, n in tag_cnt.most_common(15)],
+        "avg_cost_by_scene": [
+            {"scene": s, "avg_yen": round(a), "n": n} for s, a, n in cost_by_scene
+        ],
+        "would_revisit_rate": round(revisit, 2) if revisit is not None else None,
+    }
+
+    if args.format == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    # text
+    print(f"訪問記録ダッシュボード\n{'=' * 70}")
+    print(f"総訪問数: {total}  /  平均★: {payload['average_rating'] or '—'}"
+          f"  /  再訪意思率: {payload['would_revisit_rate'] or '—'}")
+    print(f"\n■ 年別")
+    for y, n in by_year:
+        print(f"   {y}: {'█' * n} {n}")
+    if by_month:
+        print(f"\n■ 直近12ヶ月")
+        for m, n in reversed(by_month):
+            print(f"   {m}: {'█' * n} {n}")
+    print(f"\n■ 評価分布")
+    for k in [5, 4, 3, 2, 1]:
+        n = by_rating.get(k, 0)
+        print(f"   {'★' * k}{'☆' * (5 - k)}: {'█' * n} {n}")
+    if by_scene:
+        print(f"\n■ シーン")
+        for s, n in by_scene:
+            print(f"   {s}: {n}")
+    if by_genre:
+        print(f"\n■ ジャンル TOP10")
+        for g, n in by_genre:
+            print(f"   {g}: {n}")
+    print(f"\n■ エリア（区別）")
+    for w, n in ward_cnt.most_common(10):
+        print(f"   {w}: {n}")
+    if repeats:
+        print(f"\n■ リピート店")
+        for n, c in repeats:
+            print(f"   {n}: {c}回")
+    if tag_cnt:
+        print(f"\n■ 頻出タグ TOP15")
+        print("   " + "  ".join(f"{t}({n})" for t, n in tag_cnt.most_common(15)))
+    if cost_by_scene:
+        print(f"\n■ シーン別平均コスト")
+        for s, a, n in cost_by_scene:
+            print(f"   {s or '(未分類)'}: 平均 {int(a):,}円 (n={n})")
+
+
 def cmd_add(conn, args):
     shop_id = pick_shop_id(conn, args)
     visited_at = normalize_date(args.date)
@@ -287,9 +418,13 @@ def main():
     l.add_argument("--limit", type=int, default=0)
     l.add_argument("--format", choices=["text", "csv", "tsv", "json"], default="text")
 
+    st = sub.add_parser("stats", help="訪問記録の集計ダッシュボード")
+    st.add_argument("--format", choices=["text", "json"], default="text")
+
     args = ap.parse_args()
     conn = dbmod.init_db(args.db)  # スキーマ未作成でも自動作成
-    {"add": cmd_add, "edit": cmd_edit, "rm": cmd_rm, "list": cmd_list}[args.cmd](conn, args)
+    {"add": cmd_add, "edit": cmd_edit, "rm": cmd_rm,
+     "list": cmd_list, "stats": cmd_stats}[args.cmd](conn, args)
 
 
 if __name__ == "__main__":

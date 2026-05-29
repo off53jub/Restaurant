@@ -1,4 +1,4 @@
-.PHONY: install test ingest enrich enrich-retry refresh query list q closures report visits pull-db push-db push-db-seed
+.PHONY: install test ingest enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -37,6 +37,22 @@ report:
 # 訪問記録の一覧
 visits:
 	$(PY) visit.py --db $(DB) list $(ARGS)
+
+# 訪問ダッシュボード（集計）
+stats:
+	$(PY) visit.py --db $(DB) stats
+
+# 比較HTML  例: make compare IDS="J003559227 J001238039" OUT=cmp.html
+compare:
+	$(PY) compare.py --db $(DB) --ids $(IDS) --out $(OUT)
+
+# 訪問履歴ベースのリコメンド
+recommend:
+	$(PY) recommend.py --db $(DB) $(ARGS)
+
+# Google評価取得（要GOOGLE_PLACES_API_KEY） 例: make google-enrich ARGS="--visited-only"
+google-enrich:
+	$(PY) google_enrich.py --db $(DB) $(ARGS)
 
 # 月次差分: 全店再 fetch + 30日超のみ enrich
 refresh: ingest enrich

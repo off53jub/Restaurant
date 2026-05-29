@@ -122,6 +122,43 @@ make push-db          # 完成したDBをRelease (db-snapshot) にアップロ�
 
 `enrich_db.py` は50件ごとにDBコミットし、対象を「judgements未作成 or `--max-age-days`日より古い」で選ぶため、**中断しても `make enrich` 再実行でレジューム**できます。
 
+### 訪問記録・ダッシュボード・リコメンド
+
+```bash
+# 記録の追加（FTSで店検索 or 手入力）
+python3 visit.py add --search "花びし" --rating 5 --cost 8000 --scene kaishoku
+python3 visit.py add --manual --name "未在" --address "京都市東山区" --rating 5
+
+# 一覧 / 統計
+python3 visit.py list --rating-min 4
+python3 visit.py stats              # 年別/月別/評価/シーン/エリア/タグ/平均コスト
+
+# 訪問履歴から似た未訪問店をサジェスト
+python3 recommend.py --min-rating 4 --limit 10
+
+# 候補2-5店を横並び比較HTML（共有用）
+python3 compare.py --preset kaishoku --top 3 --with-nijikai --out cmp.html
+python3 compare.py --ids J003559227 J001238039 J000711062 --out cmp.html
+```
+
+### Google評価統合（任意 / 要APIキー）
+
+```bash
+# セットアップ: Google Cloud → Places API有効化 → キー発行 → .env に
+echo 'GOOGLE_PLACES_API_KEY=AIza...' >> .env
+
+# クエリ結果だけ拡張（コスト最小）
+python3 query.py --preset kaishoku --format json | python3 google_enrich.py --from-stdin
+
+# 訪問済みの店だけ
+python3 google_enrich.py --visited-only
+
+# Google評価でフィルタ
+python3 query.py --preset kaishoku --google-min 4.0 --google-reviews-min 30
+```
+
+90日キャッシュで再課金回避。料金目安: Text Search Pro $32/1000 = 100店で約$3.2。
+
 ### 検索
 
 ```bash

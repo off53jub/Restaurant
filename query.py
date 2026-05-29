@@ -53,6 +53,12 @@ def row_to_dict(idx, r, price_band=None, scene=None):
         "instagram_score": r["instagram_score"],
         "url": r["pc_url"],
     }
+    try:
+        if r["google_rating"] is not None:
+            d["google_rating"] = r["google_rating"]
+            d["google_reviews"] = r["google_reviews"]
+    except (IndexError, KeyError):
+        pass
     if d["fit_score"] is None:
         del d["fit_score"]
     return d
@@ -143,15 +149,29 @@ def build_where(preset, area_kw=None, fts=None, price_min=None, price_max=None,
         where.append("EXISTS (SELECT 1 FROM visits v WHERE v.shop_id = s.id)")
     elif visited is False:
         where.append("NOT EXISTS (SELECT 1 FROM visits v WHERE v.shop_id = s.id)")
+    # Google評価
+    if kwargs_extras:
+        gmin = kwargs_extras.get("google_min")
+        grev = kwargs_extras.get("google_reviews_min")
+        if gmin is not None:
+            where.append("EXISTS (SELECT 1 FROM google g WHERE g.shop_id=s.id AND g.rating >= ?)")
+            args.append(gmin)
+        if grev is not None:
+            where.append("EXISTS (SELECT 1 FROM google g WHERE g.shop_id=s.id AND g.user_ratings_total >= ?)")
+            args.append(grev)
     # 取得失敗除外
     where.append("(j.fetch_error IS NULL OR j.fetch_error = '')")
     return where, args, has_price_filter, (pmin, pmax), fts
 
 
-def query(conn, preset_name=None, scene=None, sort=None, visited=None, **kwargs):
+def query(conn, preset_name=None, scene=None, sort=None, visited=None,
+          google_min=None, google_reviews_min=None, **kwargs):
     preset = PRESETS.get(preset_name) if preset_name else None
     where, args, has_price, price_band, fts = build_where(
-        preset, kwargs_extras={"visited": visited}, **kwargs
+        preset,
+        kwargs_extras={"visited": visited, "google_min": google_min,
+                       "google_reviews_min": google_reviews_min},
+        **kwargs,
     )
     scene = scene or (preset.get("scene") if preset else None)
     where_sql = " AND ".join(where) if where else "1=1"
@@ -169,10 +189,14 @@ def query(conn, preset_name=None, scene=None, sort=None, visited=None, **kwargs)
         args = [fts] + args
 
     sql = f"""
-    SELECT s.*, j.*
+    SELECT s.*, j.*,
+           g.rating AS google_rating,
+           g.user_ratings_total AS google_reviews,
+           g.price_level AS google_price_level
     FROM shops s
     {fts_join}
     JOIN judgements j ON j.shop_id = s.id
+    LEFT JOIN google g ON g.shop_id = s.id
     WHERE {where_sql} {price_join}
     """
     # ソート
@@ -204,6 +228,14 @@ def format_row(idx, r, price_band=None, scene=None):
     ig_hits = json.loads(r["instagram_hits_json"] or "[]")
     fit = row_fit(r, scene, price_band)
     fit_str = f"  ★適合度 {fit}/100" if fit is not None else ""
+    # Google評価（拡張がある場合のみ）
+    try:
+        g_rating = r["google_rating"]
+        g_reviews = r["google_reviews"]
+    except (IndexError, KeyError):
+        g_rating = g_reviews = None
+    if g_rating is not None:
+        fit_str += f"  Google★{g_rating} ({g_reviews}件)"
     band_str = ""
     if price_band:
         pmin, pmax = price_band
@@ -266,6 +298,10 @@ def main():
                     help="2次会の徒歩距離(m, 既定600≒徒歩7-8分)")
     ap.add_argument("--nijikai-limit", type=int, default=3,
                     help="1候補あたり何件の2次会を出すか(既定3)")
+    ap.add_argument("--google-min", type=float,
+                    help="Google★最低値（例: 4.0）。要 google_enrich.py 事前実行")
+    ap.add_argument("--google-reviews-min", type=int,
+                    help="Google口コミ数最低（例: 30）")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--format", choices=["text", "csv", "tsv", "json"], default="text")
     ap.add_argument("--closures", action="store_true",
@@ -307,6 +343,8 @@ def main():
         scene=args.scene,
         sort=args.sort,
         visited=visited_flag,
+        google_min=args.google_min,
+        google_reviews_min=args.google_reviews_min,
         area_kw=args.area,
         fts=args.fts,
         price_min=args.price_min,

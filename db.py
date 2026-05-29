@@ -65,6 +65,22 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
     centers INTEGER NOT NULL DEFAULT 0
 );
 
+-- Google Places API で取得した店舗評価（任意機能）。
+-- API キー入手後 google_enrich.py で必要分だけ取得・キャッシュ。
+CREATE TABLE IF NOT EXISTS google (
+    shop_id TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+    place_id TEXT,
+    rating REAL,                       -- 0.0-5.0
+    user_ratings_total INTEGER,
+    price_level INTEGER,               -- 0(無料)-4(高級)
+    business_status TEXT,              -- OPERATIONAL/CLOSED_TEMPORARILY 等
+    types_json TEXT,                   -- 店舗タイプ配列
+    fetched_at TEXT NOT NULL,
+    fetch_error TEXT
+);
+CREATE INDEX IF NOT EXISTS google_rating ON google(rating);
+CREATE INDEX IF NOT EXISTS google_reviews ON google(user_ratings_total);
+
 -- 自分の訪問記録。shop_id がNULLならDB外の店(都外/ミシュラン等)を手入力で扱う。
 CREATE TABLE IF NOT EXISTS visits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
