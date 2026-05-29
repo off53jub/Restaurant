@@ -101,10 +101,23 @@ query.py   → プリセット or アドホック条件 + FTS全文検索で抽�
 
 ### 初回構築
 
+DB は GitHub Release アセット (`db-snapshot/shops.db.gz`) に永続化されます。
+
+**A. 既存のRelease DBから始める（推奨・最速）**
+
 ```bash
-make install          # venv作成 + 依存インストール
-make ingest           # 23区44中心からAPI取得（数分、約28,000店 / 約130MB）
-make enrich           # 全店のページ取得・判定（数時間、80店/分程度）
+make install
+make pull-db          # Release からDB(gz)を取得し展開（数秒〜十数秒）
+python3 query.py --preset kaishoku
+```
+
+**B. ゼロから自前構築する**
+
+```bash
+make install
+make ingest           # 23区44中心からAPI取得（数分、約28,000店）
+make enrich           # 全店のページ取得・判定（数時間、80店/分）
+make push-db          # 完成したDBをRelease (db-snapshot) にアップロード（初回のみシード）
 ```
 
 `enrich_db.py` は50件ごとにDBコミットし、対象を「judgements未作成 or `--max-age-days`日より古い」で選ぶため、**中断しても `make enrich` 再実行でレジューム**できます。
@@ -133,6 +146,7 @@ python3 query.py --fts "個室 AND 銀座" --price-min 6000 --price-max 10000
 
 ```bash
 make refresh   # ingest（全店再fetch・last_seen_at更新） → enrich（30日超のみ再判定）
+make push-db   # 更新後のDBをReleaseへ上書き
 ```
 
 閉店検知は `shops.last_seen_at` が最新ingestより古い店を抽出すれば可能：
@@ -142,17 +156,32 @@ SELECT name, address, last_seen_at FROM shops
 WHERE last_seen_at < (SELECT MAX(last_seen_at) FROM shops);
 ```
 
-#### 自動実行（ローカル推奨）
+#### DB の永続化（GitHub Release）
 
-DBは永続ディスクに置くのが前提なので、運用はローカルマシンか常時起動VPSが向いています。
+| 場所 | 内容 |
+|---|---|
+| Release タグ `db-snapshot` | 常に最新のDBスナップショット。月次で上書き |
+| アセット `shops.db.gz` | gzip圧縮されたSQLite DB（実測 134MB→22MB、約15%） |
 
-**cron（Linux）** — 毎月1日 午前4時:
+`make pull-db` / `make push-db` で双方向に同期。CIから書き込むため `gh` CLI が依存（ローカルでは要 `gh auth login`、CI上ではGITHUB_TOKENが自動）。
 
+#### 自動実行
+
+**A. クラウド月次（推奨・無人運用可）** — `.github/workflows/monthly-refresh.yml` が毎月1日4時(JST)に実行:
+1. Release から前回DBを復元
+2. ingest + 差分enrich
+3. VACUUM + gzip して Release を上書き
+
+リポジトリ secrets に `HOTPEPPER_API_KEY` を登録するだけで動作。手動キック (`workflow_dispatch`) も可。
+
+**B. ローカル cron / launchd / systemd**
+
+cron (Linux), 毎月1日 4時:
 ```cron
-0 4 1 * * cd /path/to/Restaurant && make refresh >> refresh.log 2>&1
+0 4 1 * * cd /path/to/Restaurant && make refresh && make push-db >> refresh.log 2>&1
 ```
 
-**launchd（macOS）** — `~/Library/LaunchAgents/com.restaurant.refresh.plist`:
+launchd (macOS) — `~/Library/LaunchAgents/com.restaurant.refresh.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -162,7 +191,7 @@ DBは永続ディスクに置くのが前提なので、運用はローカルマ
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string><string>-c</string>
-    <string>cd /path/to/Restaurant && make refresh >> refresh.log 2>&1</string>
+    <string>cd /path/to/Restaurant && make refresh && make push-db >> refresh.log 2>&1</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict><key>Day</key><integer>1</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
@@ -170,7 +199,7 @@ DBは永続ディスクに置くのが前提なので、運用はローカルマ
 ```
 `launchctl load ~/Library/LaunchAgents/com.restaurant.refresh.plist` で登録。
 
-**systemd timer（Linux）** — `restaurant-refresh.service` + `restaurant-refresh.timer`（`OnCalendar=*-*-01 04:00:00`）。
+systemd timer (Linux): `restaurant-refresh.service` + `restaurant-refresh.timer` (`OnCalendar=*-*-01 04:00:00`)。
 
 ### スキーマ
 

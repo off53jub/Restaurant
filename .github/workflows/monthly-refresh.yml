@@ -1,8 +1,7 @@
 name: Monthly DB refresh
 
-# 月次でDBを再構築するクラウド版cron（ローカル運用が難しい場合の代替）。
-# DBは永続ディスクが無いため、ビルド成果物として Artifact に保存する。
-# 必要に応じて Release アセットや外部ストレージ(S3等)へ載せ替えてください。
+# 月次でDBを再構築するクラウド版cron。
+# Release アセット db-snapshot/shops.db.gz を読み書きすることで永続化する。
 
 on:
   schedule:
@@ -12,7 +11,9 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 600     # enrichは数時間かかるため上限を引き上げ
+    timeout-minutes: 350     # ハードリミット6h（=360分）内に収める
+    permissions:
+      contents: write        # release create/upload に必要
     steps:
       - uses: actions/checkout@v4
 
@@ -25,13 +26,19 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install -r requirements.txt
 
-      # 前回の成果物DBを復元（差分enrichを効かせるため）。無ければ新規構築。
-      - name: Restore previous DB
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: shops-db
-          path: db
+      # 前回のRelease DBを復元。無ければ新規構築。
+      - name: Restore previous DB from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p db
+          if gh release view db-snapshot >/dev/null 2>&1; then
+            gh release download db-snapshot --pattern shops.db.gz --dir db
+            gunzip -f db/shops.db.gz
+            echo "Restored db/shops.db ($(du -h db/shops.db | cut -f1))"
+          else
+            echo "No db-snapshot release found; will build from scratch."
+          fi
 
       - name: Ingest (23 wards)
         env:
@@ -43,9 +50,20 @@ jobs:
           HOTPEPPER_API_KEY: ${{ secrets.HOTPEPPER_API_KEY }}
         run: .venv/bin/python enrich_db.py --db db/shops.db --concurrency 12 --delay 0.3
 
-      - name: Upload DB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: shops-db
-          path: db/shops.db
-          retention-days: 90
+      - name: Compact and compress DB
+        run: |
+          .venv/bin/python -c "import sqlite3; c=sqlite3.connect('db/shops.db'); c.execute('VACUUM'); c.close()"
+          gzip -9 -kf db/shops.db
+          du -h db/shops.db db/shops.db.gz
+
+      - name: Upload DB to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view db-snapshot >/dev/null 2>&1; then
+            gh release upload db-snapshot db/shops.db.gz --clobber
+          else
+            gh release create db-snapshot db/shops.db.gz \
+              --title "DB snapshot" \
+              --notes "23区レストランDB（gzip圧縮）。月次自動更新。"
+          fi
