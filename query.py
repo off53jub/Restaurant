@@ -8,11 +8,58 @@
   python query.py --list-presets
 """
 import argparse
+import csv
 import json
 import sys
 
 import db as dbmod
 from filter import PRESETS
+
+
+def row_to_dict(idx, r, price_band=None):
+    """1行を出力用のフラットな dict に変換（csv/json/tsv 共通）。"""
+    drink_prices = json.loads(r["drink_course_prices_json"] or "[]")
+    in_band = ""
+    if price_band:
+        pmin, pmax = price_band
+        in_band = "/".join(str(p) for p in drink_prices if pmin <= p <= pmax)
+    return {
+        "rank": idx,
+        "name": r["name"],
+        "genre": r["genre_name"],
+        "address": r["address"],
+        "access": r["access"],
+        "drink_course_min_yen": r["drink_course_min_yen"],
+        "drink_course_prices": "/".join(str(p) for p in drink_prices),
+        "in_band_prices": in_band,
+        "fully_private_room": r["fully_private_room"],
+        "mid_room_ok": r["mid_room_ok"],
+        "mid_room_evidence": r["mid_room_evidence"],
+        "smoking": r["smoking_at_seat"],
+        "kaishoku_score": r["kaishoku_score"],
+        "atmosphere_calm": r["atmosphere_calm"],
+        "atmosphere_special": r["atmosphere_special"],
+        "instagram_score": r["instagram_score"],
+        "url": r["pc_url"],
+    }
+
+
+def emit(rows, fmt, price_band):
+    """rows を指定フォーマットで標準出力へ。"""
+    dicts = [row_to_dict(i, r, price_band) for i, r in enumerate(rows, 1)]
+    if fmt == "json":
+        print(json.dumps(dicts, ensure_ascii=False, indent=2))
+    elif fmt in ("csv", "tsv"):
+        if not dicts:
+            return
+        delim = "\t" if fmt == "tsv" else ","
+        w = csv.DictWriter(sys.stdout, fieldnames=list(dicts[0].keys()), delimiter=delim)
+        w.writeheader()
+        w.writerows(dicts)
+    else:  # text
+        print("=" * 80)
+        for i, r in enumerate(rows, 1):
+            print(format_row(i, r, price_band))
 
 
 def bar(v, width=10):
@@ -162,6 +209,9 @@ def main():
     ap.add_argument("--special-min", type=int)
     ap.add_argument("--ig-min", type=int)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--format", choices=["text", "csv", "tsv", "json"], default="text")
+    ap.add_argument("--closures", action="store_true",
+                    help="直近ingestで未確認＝閉店/移転候補の店を一覧（last_seen_atが最新より古い）")
     args = ap.parse_args()
 
     if args.list_presets:
@@ -170,6 +220,28 @@ def main():
         return
 
     conn = dbmod.connect(args.db)
+
+    if args.closures:
+        latest = conn.execute("SELECT MAX(last_seen_at) FROM shops").fetchone()[0]
+        rows = conn.execute(
+            "SELECT name, address, last_seen_at, pc_url FROM shops "
+            "WHERE last_seen_at < ? ORDER BY last_seen_at",
+            (latest,),
+        ).fetchall()
+        if args.limit > 0:
+            rows = rows[: args.limit]
+        if args.format == "json":
+            print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+        elif args.format in ("csv", "tsv"):
+            delim = "\t" if args.format == "tsv" else ","
+            w = csv.writer(sys.stdout, delimiter=delim)
+            w.writerow(["name", "address", "last_seen_at", "url"])
+            w.writerows([tuple(r) for r in rows])
+        else:
+            print(f"# 閉店/移転候補（最新ingest {latest} 未確認）: {len(rows)}件\n")
+            for r in rows:
+                print(f"  - {r['name']} / {r['address']} (last_seen {r['last_seen_at'][:10]})")
+        return
     rows, (preset, price_band) = query(
         conn,
         preset_name=args.preset,
@@ -188,6 +260,10 @@ def main():
     if args.limit > 0:
         rows = rows[: args.limit]
 
+    if args.format in ("csv", "tsv", "json"):
+        emit(rows, args.format, price_band)
+        return
+
     if preset:
         print(f"# プリセット: {args.preset} — {preset['description']}")
     else:
@@ -196,9 +272,7 @@ def main():
         print(f"# 該当: {total}件（上位{len(rows)}件を表示）\n")
     else:
         print(f"# 該当: {total}件\n")
-    print("=" * 80)
-    for i, r in enumerate(rows, 1):
-        print(format_row(i, r, price_band))
+    emit(rows, "text", price_band)
 
 
 if __name__ == "__main__":

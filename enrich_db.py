@@ -18,18 +18,23 @@ import db as dbmod
 from enrich import judge_shop, Judgement
 
 
-def select_targets(conn, max_age_days, limit):
+def select_targets(conn, max_age_days, limit, retry_errors=False):
     """enrich 対象の shop 行を返す。"""
     threshold = (
         dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=max_age_days)
     ).isoformat()
-    q = """
+    error_clause = (
+        " OR (j.fetch_error IS NOT NULL AND j.fetch_error != '')"
+        if retry_errors else ""
+    )
+    q = f"""
     SELECT s.id, s.name, s.address, s.pc_url, s.raw_json
     FROM shops s
     LEFT JOIN judgements j ON j.shop_id = s.id
     WHERE j.shop_id IS NULL
        OR j.enriched_at < ?
        OR s.fetched_at > j.enriched_at
+       {error_clause}
     ORDER BY j.enriched_at IS NULL DESC, j.enriched_at ASC
     """
     if limit > 0:
@@ -80,10 +85,12 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help=">0で先頭N件のみ")
     ap.add_argument("--concurrency", type=int, default=12)
     ap.add_argument("--delay", type=float, default=0.3)
+    ap.add_argument("--retry-errors", action="store_true",
+                    help="fetch_error が残っている店も対象に含めて再取得")
     args = ap.parse_args()
 
     conn = dbmod.connect(args.db)
-    targets = select_targets(conn, args.max_age_days, args.limit)
+    targets = select_targets(conn, args.max_age_days, args.limit, args.retry_errors)
     print(f"enrich 対象: {len(targets)}件", file=sys.stderr)
     if not targets:
         return

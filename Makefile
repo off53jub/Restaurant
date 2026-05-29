@@ -1,4 +1,4 @@
-.PHONY: install ingest enrich refresh query list q pull-db push-db push-db-seed
+.PHONY: install test ingest enrich enrich-retry refresh query list q closures pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -8,6 +8,11 @@ DB_RELEASE_TAG ?= db-snapshot
 install:
 	python3 -m venv .venv
 	.venv/bin/pip install -r requirements.txt
+	.venv/bin/pip install -r requirements-dev.txt
+
+# 抽出ロジックの退行防止テスト
+test:
+	$(PY) -m pytest -q
 
 # 23区の店舗を HotPepper API から取得（数分）
 ingest:
@@ -16,6 +21,14 @@ ingest:
 # DBの未 enrich 店 + 30日超 enrich 店を処理（数時間）
 enrich:
 	$(PY) enrich_db.py --db $(DB) --concurrency 12 --delay 0.3
+
+# fetch_error が残っている店だけ再取得（リトライ込み）
+enrich-retry:
+	$(PY) enrich_db.py --db $(DB) --retry-errors --concurrency 8 --delay 0.5
+
+# 閉店/移転候補（直近の full ingest 後に意味を持つ）
+closures:
+	$(PY) query.py --db $(DB) --closures
 
 # 月次差分: 全店再 fetch + 30日超のみ enrich
 refresh: ingest enrich

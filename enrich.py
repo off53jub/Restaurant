@@ -111,14 +111,23 @@ class Judgement:
     fetch_error: Optional[str] = None
 
 
-def fetch(url, timeout=20):
-    """指定URLをGETしてHTMLを返す。失敗時はNone。"""
-    try:
-        r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout)
-        r.raise_for_status()
-        return r.text
-    except Exception as e:
-        return f"__ERROR__: {type(e).__name__}: {e}"
+def fetch(url, timeout=20, retries=2, backoff=1.5):
+    """指定URLをGETしてHTMLを返す。失敗時は指数バックオフでリトライ。
+
+    全試行が失敗したら "__ERROR__: ..." 文字列を返す（呼び出し側が判定）。
+    一過性のネットワーク不調で店が永続的にエラー扱いになるのを防ぐ。
+    """
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout)
+            r.raise_for_status()
+            return r.text
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(backoff * (2 ** attempt))
+    return f"__ERROR__: {type(last_err).__name__}: {last_err}"
 
 
 def html_to_text(html):
@@ -131,20 +140,34 @@ def html_to_text(html):
     return soup.get_text("\n", strip=True)
 
 
-def extract_drink_course_prices(text):
-    """テキスト中で「飲み放題」の前後500文字以内にある価格を全て抽出。"""
+# 「飲み放題+1,650円」のような追加料金・別途料金を示す直前文字
+ADDON_PREFIX_RE = re.compile(r"[+＋]\s*$|別\s*$|追加\s*$|単品\s*$")
+
+
+def extract_drink_course_prices(text, window=200, min_yen=2500, max_yen=50000):
+    """「飲み放題」近傍にある“飲み放題付きコース”価格を抽出。
+
+    誤検出対策:
+      - 窓を ±200 に狭め（メニュー単品の巻き込みを抑制）
+      - min_yen=2500 で単品ドリンク/飲み放題追加料金(~1500-1980)を除外
+      - 価格直前が「+」「別途」「追加」「単品」なら追加料金とみなし除外
+    会食/デート用途(5000円〜)では min_yen=2500 でも実コースは取りこぼさない。
+    """
     prices = []
     for m in re.finditer("|".join(map(re.escape, DRINK_KEYWORDS)), text):
-        start = max(0, m.start() - 500)
-        end = min(len(text), m.end() + 500)
-        window = text[start:end]
-        for pm in PRICE_RE.finditer(window):
+        start = max(0, m.start() - window)
+        end = min(len(text), m.end() + window)
+        win = text[start:end]
+        for pm in PRICE_RE.finditer(win):
             try:
                 yen = int(pm.group(1).replace(",", ""))
-                if 500 <= yen <= 50000:  # ありえない値を除外
-                    prices.append(yen)
             except ValueError:
                 continue
+            if not (min_yen <= yen <= max_yen):
+                continue
+            if ADDON_PREFIX_RE.search(win[: pm.start()]):
+                continue
+            prices.append(yen)
     return sorted(set(prices))
 
 
