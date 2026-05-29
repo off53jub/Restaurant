@@ -83,7 +83,7 @@ def bar(v, width=10):
 
 def build_where(preset, area_kw=None, fts=None, price_min=None, price_max=None,
                 smoking=None, fully_private=None, mid_room=None, calm_min=None,
-                special_min=None, ig_min=None):
+                special_min=None, ig_min=None, kwargs_extras=None):
     """プリセットまたは個別引数から WHERE 句と引数を構築。"""
     where = []
     args = []
@@ -125,14 +125,22 @@ def build_where(preset, area_kw=None, fts=None, price_min=None, price_max=None,
     if igmin is not None:
         where.append("COALESCE(j.instagram_score,0) >= ?")
         args.append(igmin)
+    # 訪問済み/未訪問
+    visited = kwargs_extras.get("visited") if kwargs_extras else None
+    if visited is True:
+        where.append("EXISTS (SELECT 1 FROM visits v WHERE v.shop_id = s.id)")
+    elif visited is False:
+        where.append("NOT EXISTS (SELECT 1 FROM visits v WHERE v.shop_id = s.id)")
     # 取得失敗除外
     where.append("(j.fetch_error IS NULL OR j.fetch_error = '')")
     return where, args, has_price_filter, (pmin, pmax), fts
 
 
-def query(conn, preset_name=None, scene=None, sort=None, **kwargs):
+def query(conn, preset_name=None, scene=None, sort=None, visited=None, **kwargs):
     preset = PRESETS.get(preset_name) if preset_name else None
-    where, args, has_price, price_band, fts = build_where(preset, **kwargs)
+    where, args, has_price, price_band, fts = build_where(
+        preset, kwargs_extras={"visited": visited}, **kwargs
+    )
     scene = scene or (preset.get("scene") if preset else None)
     where_sql = " AND ".join(where) if where else "1=1"
     price_join = ""
@@ -237,6 +245,9 @@ def main():
     ap.add_argument("--scene", choices=["kaishoku", "date", "instagram"],
                     help="複合適合スコアのプロファイル（アドホック時。指定で自動的にcomposite順）")
     ap.add_argument("--sort", choices=["composite", "atmosphere", "instagram", "score", "price"])
+    vg = ap.add_mutually_exclusive_group()
+    vg.add_argument("--visited", action="store_true", help="訪問済みの店のみ")
+    vg.add_argument("--unvisited", action="store_true", help="未訪問の店のみ")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--format", choices=["text", "csv", "tsv", "json"], default="text")
     ap.add_argument("--closures", action="store_true",
@@ -271,11 +282,13 @@ def main():
             for r in rows:
                 print(f"  - {r['name']} / {r['address']} (last_seen {r['last_seen_at'][:10]})")
         return
+    visited_flag = True if args.visited else (False if args.unvisited else None)
     rows, (preset, price_band, scene) = query(
         conn,
         preset_name=args.preset,
         scene=args.scene,
         sort=args.sort,
+        visited=visited_flag,
         area_kw=args.area,
         fts=args.fts,
         price_min=args.price_min,

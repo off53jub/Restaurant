@@ -1,4 +1,4 @@
-.PHONY: install test ingest enrich enrich-retry refresh query list q closures pull-db push-db push-db-seed
+.PHONY: install test ingest enrich enrich-retry refresh query list q closures report visits pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -33,6 +33,10 @@ closures:
 # 写真・地図付きHTMLレポート 例: make report PRESET=kaishoku OUT=out.html
 report:
 	$(PY) report.py --db $(DB) --preset $(PRESET) --out $(OUT)
+
+# 訪問記録の一覧
+visits:
+	$(PY) visit.py --db $(DB) list $(ARGS)
 
 # 月次差分: 全店再 fetch + 30日超のみ enrich
 refresh: ingest enrich

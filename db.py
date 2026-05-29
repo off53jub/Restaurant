@@ -65,6 +65,31 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
     centers INTEGER NOT NULL DEFAULT 0
 );
 
+-- 自分の訪問記録。shop_id がNULLならDB外の店(都外/ミシュラン等)を手入力で扱う。
+CREATE TABLE IF NOT EXISTS visits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_id TEXT REFERENCES shops(id) ON DELETE SET NULL,
+    manual_name TEXT,
+    manual_address TEXT,
+    manual_url TEXT,
+    visited_at TEXT NOT NULL,            -- 'YYYY-MM-DD'
+    rating INTEGER,                      -- 1-5
+    cost_per_person INTEGER,             -- 円
+    scene TEXT,                          -- kaishoku/date/family/business 等
+    companions TEXT,                     -- フリーテキスト（同席者・人数）
+    course_name TEXT,                    -- 例: 'おまかせコース 8800円'
+    private_room INTEGER,                -- 0/1: 個室だったか
+    would_revisit INTEGER,               -- 0/1: また来たい
+    notes TEXT,
+    tags TEXT,                           -- 'カウンター,日本酒充実' カンマ区切り
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (shop_id IS NOT NULL OR manual_name IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS visits_shop_id ON visits(shop_id);
+CREATE INDEX IF NOT EXISTS visits_visited_at ON visits(visited_at);
+CREATE INDEX IF NOT EXISTS visits_rating ON visits(rating);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS shops_fts USING fts5(
     name, name_kana, address, access, catch,
     content='shops', content_rowid='rowid'
