@@ -30,6 +30,10 @@ enrich-retry:
 closures:
 	$(PY) query.py --db $(DB) --closures
 
+# 写真・地図付きHTMLレポート 例: make report PRESET=kaishoku OUT=out.html
+report:
+	$(PY) report.py --db $(DB) --preset $(PRESET) --out $(OUT)
+
 # 月次差分: 全店再 fetch + 30日超のみ enrich
 refresh: ingest enrich
 

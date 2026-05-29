@@ -31,7 +31,8 @@ PRESETS = {
         "price_max": 8800,
         "atmosphere_calm_min": None,     # フィルタには使わない（ソートのみ）
         "atmosphere_special_min": None,
-        "sort": "atmosphere",            # "atmosphere" / "score" / "price"
+        "scene": "kaishoku",             # 複合スコアのプロファイル
+        "sort": "composite",             # "composite"/"atmosphere"/"instagram"/"score"/"price"
     },
     # インスタ映えデート（新宿圏）— フォトジェニック重視
     "instagram_shinjuku": {
@@ -45,7 +46,8 @@ PRESETS = {
         "atmosphere_calm_min": None,
         "atmosphere_special_min": None,
         "instagram_score_min": 6,
-        "sort": "instagram",
+        "scene": "instagram",
+        "sort": "composite",
     },
     # デート（新宿圏）— 落ち着いた大人デート / 5,000-8,000円 / 半個室OK
     "date_shinjuku": {
@@ -58,7 +60,8 @@ PRESETS = {
         "price_max": 8000,
         "atmosphere_calm_min": 50,
         "atmosphere_special_min": 30,
-        "sort": "atmosphere",
+        "scene": "date",
+        "sort": "composite",
     },
 }
 

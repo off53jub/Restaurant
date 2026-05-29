@@ -14,17 +14,27 @@ import sys
 
 import db as dbmod
 from filter import PRESETS
+from score import composite_score
 
 
-def row_to_dict(idx, r, price_band=None):
+def row_fit(r, scene, price_band):
+    """行のシーン適合度（scene未指定なら None）。"""
+    if not scene:
+        return None
+    prices = json.loads(r["drink_course_prices_json"] or "[]")
+    return composite_score(r, prices, scene, price_band)
+
+
+def row_to_dict(idx, r, price_band=None, scene=None):
     """1行を出力用のフラットな dict に変換（csv/json/tsv 共通）。"""
     drink_prices = json.loads(r["drink_course_prices_json"] or "[]")
     in_band = ""
     if price_band:
         pmin, pmax = price_band
         in_band = "/".join(str(p) for p in drink_prices if pmin <= p <= pmax)
-    return {
+    d = {
         "rank": idx,
+        "fit_score": row_fit(r, scene, price_band),
         "name": r["name"],
         "genre": r["genre_name"],
         "address": r["address"],
@@ -42,11 +52,14 @@ def row_to_dict(idx, r, price_band=None):
         "instagram_score": r["instagram_score"],
         "url": r["pc_url"],
     }
+    if d["fit_score"] is None:
+        del d["fit_score"]
+    return d
 
 
-def emit(rows, fmt, price_band):
+def emit(rows, fmt, price_band, scene=None):
     """rows を指定フォーマットで標準出力へ。"""
-    dicts = [row_to_dict(i, r, price_band) for i, r in enumerate(rows, 1)]
+    dicts = [row_to_dict(i, r, price_band, scene) for i, r in enumerate(rows, 1)]
     if fmt == "json":
         print(json.dumps(dicts, ensure_ascii=False, indent=2))
     elif fmt in ("csv", "tsv"):
@@ -59,7 +72,7 @@ def emit(rows, fmt, price_band):
     else:  # text
         print("=" * 80)
         for i, r in enumerate(rows, 1):
-            print(format_row(i, r, price_band))
+            print(format_row(i, r, price_band, scene))
 
 
 def bar(v, width=10):
@@ -117,9 +130,10 @@ def build_where(preset, area_kw=None, fts=None, price_min=None, price_max=None,
     return where, args, has_price_filter, (pmin, pmax), fts
 
 
-def query(conn, preset_name=None, **kwargs):
+def query(conn, preset_name=None, scene=None, sort=None, **kwargs):
     preset = PRESETS.get(preset_name) if preset_name else None
     where, args, has_price, price_band, fts = build_where(preset, **kwargs)
+    scene = scene or (preset.get("scene") if preset else None)
     where_sql = " AND ".join(where) if where else "1=1"
     price_join = ""
     if has_price:
@@ -142,7 +156,17 @@ def query(conn, preset_name=None, **kwargs):
     WHERE {where_sql} {price_join}
     """
     # ソート
-    sort_mode = preset.get("sort") if preset else "atmosphere"
+    sort_mode = preset.get("sort") if preset else (sort or ("composite" if scene else "atmosphere"))
+    band = price_band if has_price else None
+    if sort_mode == "composite" and scene:
+        rows = list(conn.execute(sql, args))
+        rows.sort(
+            key=lambda r: composite_score(
+                r, json.loads(r["drink_course_prices_json"] or "[]"), scene, band
+            ),
+            reverse=True,
+        )
+        return rows, (preset, band, scene)
     if sort_mode == "atmosphere":
         sql += " ORDER BY COALESCE(j.atmosphere_calm,0) DESC, COALESCE(j.atmosphere_special,0) DESC, j.kaishoku_score DESC"
     elif sort_mode == "instagram":
@@ -151,13 +175,15 @@ def query(conn, preset_name=None, **kwargs):
         sql += " ORDER BY j.kaishoku_score DESC, j.drink_course_min_yen ASC"
     else:
         sql += " ORDER BY j.drink_course_min_yen ASC"
-    return list(conn.execute(sql, args)), (preset, price_band if has_price else None)
+    return list(conn.execute(sql, args)), (preset, band, scene)
 
 
-def format_row(idx, r, price_band=None):
+def format_row(idx, r, price_band=None, scene=None):
     drink_prices = json.loads(r["drink_course_prices_json"] or "[]")
     kaishoku_hits = json.loads(r["kaishoku_hits_json"] or "[]")
     ig_hits = json.loads(r["instagram_hits_json"] or "[]")
+    fit = row_fit(r, scene, price_band)
+    fit_str = f"  ★適合度 {fit}/100" if fit is not None else ""
     band_str = ""
     if price_band:
         pmin, pmax = price_band
@@ -169,7 +195,7 @@ def format_row(idx, r, price_band=None):
         "unknown": "? 記載なし", "forbidden": "× 全面禁煙",
     }.get(r["smoking_at_seat"], "?")
     parts = [
-        f"\n【{idx}】 {r['name']}  [会食スコア{r['kaishoku_score']}]",
+        f"\n【{idx}】 {r['name']}{fit_str}",
         f"   ジャンル : {r['genre_name']}",
         f"   住所     : {r['address']}",
         f"   アクセス : {r['access']}",
@@ -208,6 +234,9 @@ def main():
     ap.add_argument("--calm-min", type=int)
     ap.add_argument("--special-min", type=int)
     ap.add_argument("--ig-min", type=int)
+    ap.add_argument("--scene", choices=["kaishoku", "date", "instagram"],
+                    help="複合適合スコアのプロファイル（アドホック時。指定で自動的にcomposite順）")
+    ap.add_argument("--sort", choices=["composite", "atmosphere", "instagram", "score", "price"])
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--format", choices=["text", "csv", "tsv", "json"], default="text")
     ap.add_argument("--closures", action="store_true",
@@ -242,9 +271,11 @@ def main():
             for r in rows:
                 print(f"  - {r['name']} / {r['address']} (last_seen {r['last_seen_at'][:10]})")
         return
-    rows, (preset, price_band) = query(
+    rows, (preset, price_band, scene) = query(
         conn,
         preset_name=args.preset,
+        scene=args.scene,
+        sort=args.sort,
         area_kw=args.area,
         fts=args.fts,
         price_min=args.price_min,
@@ -261,7 +292,7 @@ def main():
         rows = rows[: args.limit]
 
     if args.format in ("csv", "tsv", "json"):
-        emit(rows, args.format, price_band)
+        emit(rows, args.format, price_band, scene)
         return
 
     if preset:
@@ -272,7 +303,7 @@ def main():
         print(f"# 該当: {total}件（上位{len(rows)}件を表示）\n")
     else:
         print(f"# 該当: {total}件\n")
-    emit(rows, "text", price_band)
+    emit(rows, "text", price_band, scene)
 
 
 if __name__ == "__main__":
