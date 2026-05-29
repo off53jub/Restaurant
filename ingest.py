@@ -52,7 +52,10 @@ def upsert_shop(conn, s, now):
     shop_id = s.get("id")
     if not shop_id:
         return 0
-    row = conn.execute("SELECT id FROM shops WHERE id = ?", (shop_id,)).fetchone()
+    row = conn.execute(
+        "SELECT raw_json FROM shops WHERE id = ?", (shop_id,)
+    ).fetchone()
+    new_raw = json.dumps(s, ensure_ascii=False)
     cols = {
         "id": shop_id,
         "name": s.get("name", ""),
@@ -72,11 +75,19 @@ def upsert_shop(conn, s, now):
         "catch": s.get("catch", ""),
         "capacity": s.get("capacity", ""),
         "party_capacity": s.get("party_capacity", ""),
-        "raw_json": json.dumps(s, ensure_ascii=False),
+        "raw_json": new_raw,
         "last_seen_at": now,
         "fetched_at": now,
     }
     if row:
+        # 内容が変わっていなければ last_seen_at のみ更新（fetched_at を据え置き、
+        # enrich の差分判定 s.fetched_at > j.enriched_at を毎月誤発火させない）。
+        if row["raw_json"] == new_raw:
+            conn.execute(
+                "UPDATE shops SET last_seen_at = ? WHERE id = ?", (now, shop_id)
+            )
+            return 3
+        # 内容が変わった場合のみ data列 + fetched_at を更新（→ 次回 enrich 対象）。
         cols_sql = ", ".join(f"{k} = :{k}" for k in cols if k != "id")
         conn.execute(f"UPDATE shops SET {cols_sql} WHERE id = :id", cols)
         return 2
