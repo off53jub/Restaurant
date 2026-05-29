@@ -11,6 +11,7 @@ import json
 
 import db as dbmod
 from query import query, row_fit
+import nijikai
 
 
 def photo_url(raw_json):
@@ -33,7 +34,24 @@ def atm_bar(label, v):
     )
 
 
-def card_html(idx, r, price_band, scene):
+def nijikai_block_html(cands):
+    if not cands:
+        return ""
+    e = html.escape
+    items = []
+    for d, r in cands:
+        calm = r["atmosphere_calm"]
+        calm_str = f"落ち着き{calm}" if calm is not None else ""
+        items.append(
+            f'<a class="nk-item" href="{e(r["pc_url"])}" target="_blank" rel="noopener">'
+            f'<b>{e(r["name"])}</b>'
+            f'<span class="nk-meta">{d}m · {e(r["genre_name"])} · {calm_str}</span>'
+            f'</a>'
+        )
+    return f'<div class="nijikai"><div class="nk-label">2次会候補</div>{"".join(items)}</div>'
+
+
+def card_html(idx, r, price_band, scene, nijikai_cands=None):
     e = html.escape
     drink_prices = json.loads(r["drink_course_prices_json"] or "[]")
     band_str = ""
@@ -52,6 +70,7 @@ def card_html(idx, r, price_band, scene):
              "unknown": "—"}.get(r["smoking_at_seat"], "—")
     priv = "完全個室" if r["fully_private_room"] else "—"
     mid = "5-8名個室" if r["mid_room_ok"] else ""
+    nijikai_html = nijikai_block_html(nijikai_cands or [])
     return f"""
 <div class="card" id="card-{idx}">
   <div class="thumb">{img_html}{fit_badge}</div>
@@ -69,15 +88,24 @@ def card_html(idx, r, price_band, scene):
       <span>会食{r['kaishoku_score']}</span>
       <span>映え{r['instagram_score']}</span>
     </div>
+    {nijikai_html}
   </div>
 </div>"""
 
 
-def build_html(rows, title, price_band, scene):
+def build_html(rows, title, price_band, scene, conn=None, nijikai_opts=None):
     markers = []
     cards = []
     for i, r in enumerate(rows, 1):
-        cards.append(card_html(i, r, price_band, scene))
+        nk = None
+        if conn is not None and nijikai_opts:
+            nk = nijikai.find_nijikai(
+                conn, r["lat"], r["lng"], scene=scene,
+                max_distance_m=nijikai_opts["distance"],
+                limit=nijikai_opts["limit"],
+                exclude_shop_id=r["id"],
+            )
+        cards.append(card_html(i, r, price_band, scene, nk))
         if r["lat"] and r["lng"]:
             fit = row_fit(r, scene, price_band)
             markers.append({
@@ -119,6 +147,11 @@ def build_html(rows, title, price_band, scene):
  .atm .fill{{height:100%;background:linear-gradient(90deg,#f0a,#c0392b)}}
  .tags{{margin-top:8px;display:flex;flex-wrap:wrap;gap:5px}}
  .tags span{{background:#f0f0f0;border-radius:5px;padding:2px 7px;font-size:11px;color:#444}}
+ .nijikai{{margin-top:10px;padding-top:8px;border-top:1px dashed #ddd}}
+ .nk-label{{font-size:11px;color:var(--mut);margin-bottom:4px}}
+ .nk-item{{display:block;padding:5px 7px;background:#fafafa;border:1px solid #eee;border-radius:6px;margin-bottom:4px;text-decoration:none;color:#222}}
+ .nk-item:hover{{background:#f0f0f0}} .nk-item b{{font-size:12px}}
+ .nk-meta{{display:block;color:var(--mut);font-size:10.5px;margin-top:1px}}
 </style></head><body>
 <header><h1>{html.escape(title)}</h1><div class="sub">{len(rows)}件 ・ 適合度＝シーン複合スコア ・ ピンクリックでカードへ</div></header>
 <div id="map"></div>
@@ -158,6 +191,10 @@ def main():
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--out", default="report.html")
     ap.add_argument("--title")
+    ap.add_argument("--with-nijikai", action="store_true",
+                    help="各候補の徒歩圏で2次会候補をカード内に表示")
+    ap.add_argument("--nijikai-distance", type=int, default=600)
+    ap.add_argument("--nijikai-limit", type=int, default=3)
     args = ap.parse_args()
 
     conn = dbmod.connect(args.db)
@@ -172,7 +209,9 @@ def main():
         rows = rows[: args.limit]
 
     title = args.title or (preset["description"] if preset else "レストラン候補")
-    htmls = build_html(rows, title, price_band, scene)
+    nk_opts = ({"distance": args.nijikai_distance, "limit": args.nijikai_limit}
+               if args.with_nijikai else None)
+    htmls = build_html(rows, title, price_band, scene, conn=conn, nijikai_opts=nk_opts)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(htmls)
     print(f"{args.out} を生成（{len(rows)}件）")

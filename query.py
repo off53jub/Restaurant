@@ -15,6 +15,7 @@ import sys
 import db as dbmod
 from filter import PRESETS
 from score import composite_score
+import nijikai
 
 
 def row_fit(r, scene, price_band):
@@ -57,7 +58,7 @@ def row_to_dict(idx, r, price_band=None, scene=None):
     return d
 
 
-def emit(rows, fmt, price_band, scene=None):
+def emit(rows, fmt, price_band, scene=None, conn=None, nijikai_opts=None):
     """rows を指定フォーマットで標準出力へ。"""
     dicts = [row_to_dict(i, r, price_band, scene) for i, r in enumerate(rows, 1)]
     if fmt == "json":
@@ -73,6 +74,17 @@ def emit(rows, fmt, price_band, scene=None):
         print("=" * 80)
         for i, r in enumerate(rows, 1):
             print(format_row(i, r, price_band, scene))
+            if conn is not None and nijikai_opts:
+                cands = nijikai.find_nijikai(
+                    conn, r["lat"], r["lng"], scene=scene,
+                    max_distance_m=nijikai_opts["distance"],
+                    limit=nijikai_opts["limit"],
+                    exclude_shop_id=r["id"],
+                )
+                if cands:
+                    print(f"   2次会候補 (徒歩{nijikai_opts['distance']}m圏):")
+                    for d, nr in cands:
+                        print(nijikai.format_nijikai_line(d, nr))
 
 
 def bar(v, width=10):
@@ -248,6 +260,12 @@ def main():
     vg = ap.add_mutually_exclusive_group()
     vg.add_argument("--visited", action="store_true", help="訪問済みの店のみ")
     vg.add_argument("--unvisited", action="store_true", help="未訪問の店のみ")
+    ap.add_argument("--with-nijikai", action="store_true",
+                    help="各候補の徒歩圏で2次会候補を表示")
+    ap.add_argument("--nijikai-distance", type=int, default=600,
+                    help="2次会の徒歩距離(m, 既定600≒徒歩7-8分)")
+    ap.add_argument("--nijikai-limit", type=int, default=3,
+                    help="1候補あたり何件の2次会を出すか(既定3)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--format", choices=["text", "csv", "tsv", "json"], default="text")
     ap.add_argument("--closures", action="store_true",
@@ -304,6 +322,8 @@ def main():
     if args.limit > 0:
         rows = rows[: args.limit]
 
+    nijikai_opts = ({"distance": args.nijikai_distance, "limit": args.nijikai_limit}
+                    if args.with_nijikai else None)
     if args.format in ("csv", "tsv", "json"):
         emit(rows, args.format, price_band, scene)
         return
@@ -316,7 +336,7 @@ def main():
         print(f"# 該当: {total}件（上位{len(rows)}件を表示）\n")
     else:
         print(f"# 該当: {total}件\n")
-    emit(rows, "text", price_band, scene)
+    emit(rows, "text", price_band, scene, conn=conn, nijikai_opts=nijikai_opts)
 
 
 if __name__ == "__main__":
