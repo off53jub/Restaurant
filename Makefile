@@ -1,4 +1,4 @@
-.PHONY: install test ingest ingest-gnavi enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich pull-db push-db push-db-seed
+.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -21,6 +21,10 @@ ingest:
 # 23区の店舗を ぐるなび API から取得（HotPepperと相互補完）
 ingest-gnavi:
 	$(PY) ingest_gnavi.py --db $(DB)
+
+# 23区の店舗を OpenStreetMap (Overpass) から取得（無料・キー不要）
+ingest-osm:
+	$(PY) ingest_osm.py --db $(DB)
 
 # DBの未 enrich 店 + 30日超 enrich 店を処理（数時間）
 enrich:
