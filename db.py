@@ -82,6 +82,26 @@ CREATE TABLE IF NOT EXISTS google (
 CREATE INDEX IF NOT EXISTS google_rating ON google(rating);
 CREATE INDEX IF NOT EXISTS google_reviews ON google(user_ratings_total);
 
+-- 公式サイトから抽出した SNS アカウントと OG メタ情報（任意機能）。
+-- enrich_social.py で OSMの website / HPの公式リンクから取得・キャッシュ。
+CREATE TABLE IF NOT EXISTS social (
+    shop_id TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+    instagram_url TEXT,
+    tiktok_url TEXT,
+    facebook_url TEXT,
+    twitter_url TEXT,
+    line_url TEXT,
+    youtube_url TEXT,
+    og_title TEXT,
+    og_description TEXT,
+    og_image TEXT,
+    final_url TEXT,                  -- 最終リダイレクト先（短縮URL展開後）
+    fetched_at TEXT NOT NULL,
+    fetch_error TEXT
+);
+CREATE INDEX IF NOT EXISTS social_instagram ON social(instagram_url);
+CREATE INDEX IF NOT EXISTS social_tiktok ON social(tiktok_url);
+
 -- 自分の訪問記録。shop_id がNULLならDB外の店(都外/ミシュラン等)を手入力で扱う。
 CREATE TABLE IF NOT EXISTS visits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

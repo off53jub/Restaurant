@@ -70,6 +70,17 @@ def card_html(idx, r, price_band, scene, nijikai_cands=None):
         pass
     google_html = (f'<div class="google">G★{g_rating} <small>({g_reviews}件)</small></div>'
                    if g_rating is not None else "")
+    # SNS バッジ
+    sns_links = []
+    try:
+        ig = r["social_instagram"]; tt = r["social_tiktok"]
+    except (IndexError, KeyError):
+        ig = tt = None
+    if ig:
+        sns_links.append(f'<a class="sns ig" href="{e(ig)}" target="_blank" rel="noopener">📷 IG</a>')
+    if tt:
+        sns_links.append(f'<a class="sns tt" href="{e(tt)}" target="_blank" rel="noopener">🎵 TT</a>')
+    sns_html = ('<div class="sns-row">' + "".join(sns_links) + '</div>') if sns_links else ""
     img = photo_url(r["raw_json"])
     img_html = (f'<img loading="lazy" src="{e(img)}" alt="">' if img
                 else '<div class="noimg">No Photo</div>')
@@ -96,6 +107,7 @@ def card_html(idx, r, price_band, scene, nijikai_cands=None):
       <span>会食{r['kaishoku_score']}</span>
       <span>映え{r['instagram_score']}</span>
     </div>
+    {sns_html}
     {nijikai_html}
   </div>
 </div>"""
@@ -162,6 +174,9 @@ def build_html(rows, title, price_band, scene, conn=None, nijikai_opts=None):
  .nk-meta{{display:block;color:var(--mut);font-size:10.5px;margin-top:1px}}
  .google{{display:inline-block;background:#fff8e1;color:#b8860b;border:1px solid #ffd54f;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;margin-left:6px;vertical-align:middle}}
  .google small{{color:#999;font-weight:400}}
+ .sns-row{{margin-top:6px;display:flex;gap:5px}}
+ .sns{{font-size:11px;padding:2px 7px;border-radius:4px;text-decoration:none;font-weight:600}}
+ .sns.ig{{background:#e1306c;color:#fff}} .sns.tt{{background:#000;color:#fff}}
 </style></head><body>
 <header><h1>{html.escape(title)}</h1><div class="sub">{len(rows)}件 ・ 適合度＝シーン複合スコア ・ ピンクリックでカードへ</div></header>
 <div id="map"></div>

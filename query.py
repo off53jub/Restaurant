@@ -192,11 +192,15 @@ def query(conn, preset_name=None, scene=None, sort=None, visited=None,
     SELECT s.*, j.*,
            g.rating AS google_rating,
            g.user_ratings_total AS google_reviews,
-           g.price_level AS google_price_level
+           g.price_level AS google_price_level,
+           so.instagram_url AS social_instagram,
+           so.tiktok_url AS social_tiktok,
+           so.og_description AS social_og_description
     FROM shops s
     {fts_join}
     JOIN judgements j ON j.shop_id = s.id
     LEFT JOIN google g ON g.shop_id = s.id
+    LEFT JOIN social so ON so.shop_id = s.id
     WHERE {where_sql} {price_join}
     """
     # ソート
@@ -236,6 +240,16 @@ def format_row(idx, r, price_band=None, scene=None):
         g_rating = g_reviews = None
     if g_rating is not None:
         fit_str += f"  Google★{g_rating} ({g_reviews}件)"
+    # SNS情報（あれば末尾に）
+    try:
+        ig = r["social_instagram"]
+        tt = r["social_tiktok"]
+    except (IndexError, KeyError):
+        ig = tt = None
+    sns_tags = []
+    if ig: sns_tags.append(f"IG {ig}")
+    if tt: sns_tags.append(f"TT {tt}")
+    sns_line = ("   SNS: " + " / ".join(sns_tags)) if sns_tags else ""
     band_str = ""
     if price_band:
         pmin, pmax = price_band
@@ -268,6 +282,8 @@ def format_row(idx, r, price_band=None, scene=None):
         f"   会食適性 : {', '.join(kaishoku_hits[:6])}",
         f"   URL      : {r['pc_url']}",
     ])
+    if sns_line:
+        parts.append(sns_line)
     return "\n".join(parts)
 
 
