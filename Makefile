@@ -1,4 +1,4 @@
-.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich social-enrich reviews osm-gap pull-db push-db push-db-seed
+.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich social-enrich reviews wiki-enrich osm-gap pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -69,6 +69,10 @@ social-enrich:
 # 店の口コミ要約表示 例: make reviews ARGS="--shop-id J003559227"
 reviews:
 	$(PY) reviews.py --db $(DB) $(ARGS)
+
+# Wikidata/Wikipedia 連携 例: make wiki-enrich ARGS="--visited-only"
+wiki-enrich:
+	$(PY) enrich_wiki.py --db $(DB) $(ARGS)
 
 # OSM固有(HotPepper未掲載)店のHTML発掘 例: make osm-gap AREA=港区 OUT=out/gap.html
 osm-gap:

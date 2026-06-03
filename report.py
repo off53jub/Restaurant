@@ -54,6 +54,15 @@ def nijikai_block_html(cands):
 def card_html(idx, r, price_band, scene, nijikai_cands=None):
     e = html.escape
     drink_prices = json.loads(r["drink_course_prices_json"] or "[]")
+    # 店舗紹介 (raw_jsonから)
+    catch_line = ""
+    shop_memo = ""
+    try:
+        raw_obj = json.loads(r["raw_json"] or "{}")
+        catch_line = (raw_obj.get("catch") or "").strip()
+        shop_memo = (raw_obj.get("shop_detail_memo") or raw_obj.get("other_memo") or "").strip()
+    except Exception:
+        pass
     band_str = ""
     if price_band:
         lo, hi = price_band
@@ -89,6 +98,15 @@ def card_html(idx, r, price_band, scene, nijikai_cands=None):
     priv = "完全個室" if r["fully_private_room"] else "—"
     mid = "5-8名個室" if r["mid_room_ok"] else ""
     nijikai_html = nijikai_block_html(nijikai_cands or [])
+    catch_html = f'<div class="catch">💬 {e(catch_line[:80])}</div>' if catch_line else ""
+    memo_html = f'<div class="memo">{e(shop_memo[:120])}</div>' if shop_memo else ""
+    desc_html = ""
+    try:
+        sd = r["shop_description"]
+        if sd:
+            desc_html = f'<details class="desc-block"><summary>📖 店紹介を読む</summary><div class="desc-body">{e(sd[:600])}</div></details>'
+    except (IndexError, KeyError):
+        pass
     return f"""
 <div class="card" id="card-{idx}">
   <div class="thumb">{img_html}{fit_badge}</div>
@@ -96,8 +114,10 @@ def card_html(idx, r, price_band, scene, nijikai_cands=None):
     <h3><span class="rank">{idx}</span>
         <a href="{e(r['pc_url'])}" target="_blank" rel="noopener">{e(r['name'])}</a>
         {google_html}</h3>
+    {catch_html}
     <div class="meta">{e(r['genre_name'])}・{e(r['address'])}</div>
     <div class="meta small">{e(r['access'] or '')}</div>
+    {memo_html}
     {atm_bar('落ち着き', r['atmosphere_calm'])}
     {atm_bar('特別感', r['atmosphere_special'])}
     <div class="tags">
@@ -108,6 +128,7 @@ def card_html(idx, r, price_band, scene, nijikai_cands=None):
       <span>映え{r['instagram_score']}</span>
     </div>
     {sns_html}
+    {desc_html}
     {nijikai_html}
   </div>
 </div>"""
@@ -177,6 +198,11 @@ def build_html(rows, title, price_band, scene, conn=None, nijikai_opts=None):
  .sns-row{{margin-top:6px;display:flex;gap:5px}}
  .sns{{font-size:11px;padding:2px 7px;border-radius:4px;text-decoration:none;font-weight:600}}
  .sns.ig{{background:#e1306c;color:#fff}} .sns.tt{{background:#000;color:#fff}}
+ .catch{{margin:6px 0 4px;color:#c0392b;font-size:13px;line-height:1.4;font-weight:600}}
+ .memo{{margin-top:6px;color:#555;font-size:11.5px;line-height:1.45;background:#fafafa;border-left:3px solid #ddd;padding:6px 9px;border-radius:4px}}
+ .desc-block{{margin-top:8px;font-size:12px;color:#444}}
+ .desc-block summary{{cursor:pointer;color:#1a4ed8;font-weight:600;font-size:11.5px}}
+ .desc-body{{margin-top:6px;line-height:1.55;background:#fffdf7;border-left:3px solid #f0c040;padding:7px 10px;border-radius:4px;color:#333}}
 </style></head><body>
 <header><h1>{html.escape(title)}</h1><div class="sub">{len(rows)}件 ・ 適合度＝シーン複合スコア ・ ピンクリックでカードへ</div></header>
 <div id="map"></div>

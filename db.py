@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS judgements (
     atmosphere_special INTEGER,
     instagram_score INTEGER NOT NULL DEFAULT 0,
     instagram_hits_json TEXT,
+    shop_description TEXT,
     fetch_error TEXT,
     enriched_at TEXT NOT NULL
 );
@@ -65,6 +66,18 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
     updated_shops INTEGER NOT NULL DEFAULT 0,
     centers INTEGER NOT NULL DEFAULT 0
 );
+
+-- Wikidata/Wikipedia から補完した店情報（老舗・有名店向け、任意機能）。
+CREATE TABLE IF NOT EXISTS wiki (
+    shop_id TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+    wikidata_id TEXT,
+    label TEXT,
+    description TEXT,
+    wikipedia_ja_url TEXT,
+    summary TEXT,
+    fetched_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS wiki_wikidata ON wiki(wikidata_id);
 
 -- Google Places API で取得した店舗評価（任意機能）。
 -- API キー入手後 google_enrich.py で必要分だけ取得・キャッシュ。
@@ -182,6 +195,10 @@ def migrate(conn):
         conn.execute("ALTER TABLE shops ADD COLUMN source TEXT NOT NULL DEFAULT 'hotpepper'")
     # source 列確定後にインデックス作成
     conn.execute("CREATE INDEX IF NOT EXISTS shops_source ON shops(source)")
+    # judgements に shop_description 列を追加（既存DB向け）
+    jcols = [r["name"] for r in conn.execute("PRAGMA table_info(judgements)").fetchall()]
+    if jcols and "shop_description" not in jcols:
+        conn.execute("ALTER TABLE judgements ADD COLUMN shop_description TEXT")
     conn.commit()
 
 

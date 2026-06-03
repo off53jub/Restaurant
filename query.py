@@ -230,6 +230,15 @@ def format_row(idx, r, price_band=None, scene=None):
     drink_prices = json.loads(r["drink_course_prices_json"] or "[]")
     kaishoku_hits = json.loads(r["kaishoku_hits_json"] or "[]")
     ig_hits = json.loads(r["instagram_hits_json"] or "[]")
+    # 店舗紹介系（raw_json から）
+    catch_line = ""
+    shop_memo = ""
+    try:
+        raw = json.loads(r["raw_json"] or "{}")
+        catch_line = (raw.get("catch") or "").strip()
+        shop_memo = (raw.get("shop_detail_memo") or raw.get("other_memo") or "").strip()
+    except Exception:
+        pass
     fit = row_fit(r, scene, price_band)
     fit_str = f"  ★適合度 {fit}/100" if fit is not None else ""
     # Google評価（拡張がある場合のみ）
@@ -262,6 +271,10 @@ def format_row(idx, r, price_band=None, scene=None):
     }.get(r["smoking_at_seat"], "?")
     parts = [
         f"\n【{idx}】 {r['name']}{fit_str}",
+    ]
+    if catch_line:
+        parts.append(f"   キャッチ : {catch_line[:80]}")
+    parts.extend([
         f"   ジャンル : {r['genre_name']}",
         f"   住所     : {r['address']}",
         f"   アクセス : {r['access']}",
@@ -269,7 +282,15 @@ def format_row(idx, r, price_band=None, scene=None):
         f"{r['atmosphere_calm'] if r['atmosphere_calm'] is not None else '?'}/100",
         f"             特別な日   {bar(r['atmosphere_special'])} "
         f"{r['atmosphere_special'] if r['atmosphere_special'] is not None else '?'}/100",
-    ]
+    ])
+    if shop_memo:
+        parts.append(f"   店情報   : {shop_memo[:100]}")
+    try:
+        sd = r["shop_description"]
+        if sd:
+            parts.append(f"   店紹介   : {sd[:200]}{'…' if len(sd) > 200 else ''}")
+    except (IndexError, KeyError):
+        pass
     if band_str:
         parts.append(f"   ★該当帯  : {band_str}")
     parts.extend([

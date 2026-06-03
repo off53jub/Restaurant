@@ -65,6 +65,7 @@ def upsert_judgement(conn, shop_id, j: Judgement, now: str):
         "atmosphere_special": d["atmosphere_special"],
         "instagram_score": d["instagram_score"],
         "instagram_hits_json": json.dumps(d["instagram_hits"], ensure_ascii=False),
+        "shop_description": d.get("shop_description") or None,
         "fetch_error": d["fetch_error"],
         "enriched_at": now,
     }

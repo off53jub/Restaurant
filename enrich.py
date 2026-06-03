@@ -108,6 +108,7 @@ class Judgement:
     atmosphere_special: Optional[int] = None  # 0=普段使い … 100=特別な日
     instagram_score: int = 0
     instagram_hits: list = field(default_factory=list)
+    shop_description: str = ""               # ページ内の「お店の特徴」等
     fetch_error: Optional[str] = None
 
 
@@ -256,6 +257,40 @@ def extract_atmosphere(html):
     return calm, special
 
 
+_MENU_PRICE_RE = re.compile(r"\d[\d,]*\s*円\s*[（(]\s*税込\s*[)）]")
+_MULTI_PRICE_RE = re.compile(r"\d[\d,]*\s*円")
+
+
+def _is_menu_block(text):
+    """メニュー説明（「○○円（税込）」、または料金3つ以上）かを判定。"""
+    if _MENU_PRICE_RE.search(text):
+        return True
+    return len(_MULTI_PRICE_RE.findall(text)) >= 3
+
+
+def extract_shop_description(html, max_chars=600):
+    """HotPepperページから店ごとのオリジナル紹介文を抽出。
+
+    column5A クラスに各セクション（個室/コース/外観/料理など）の説明が入っている。
+    メニュー＋料金が並ぶブロックは除外し、店の特徴・空間・雰囲気を伝える文だけ拾う。
+    """
+    if not html or html.startswith("__ERROR__"):
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    blocks = []
+    for el in soup.find_all(class_="column5A"):
+        t = el.get_text(" ", strip=True)
+        if not (30 < len(t) < 400):
+            continue
+        if _is_menu_block(t):
+            continue
+        # 重複（ほぼ同文）を排除
+        if not any(t[:50] == b[:50] for b in blocks):
+            blocks.append(t)
+    text = " / ".join(blocks)
+    return text[:max_chars]
+
+
 def judge_shop(shop, delay=0.5):
     """1店舗の判定を行う。"""
     pc_url = shop.get("urls", {}).get("pc", "")
@@ -319,6 +354,9 @@ def judge_shop(shop, delay=0.5):
     ig_score, ig_hits = detect_instagram(combined)
     j.instagram_score = ig_score
     j.instagram_hits = ig_hits
+
+    # 店ごとのオリジナル紹介文（HotPepperページ内 column5A）
+    j.shop_description = extract_shop_description(top_html)
 
     return j
 
