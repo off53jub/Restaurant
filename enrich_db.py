@@ -18,7 +18,7 @@ import db as dbmod
 from enrich import judge_shop, Judgement
 
 
-def select_targets(conn, max_age_days, limit, retry_errors=False):
+def select_targets(conn, max_age_days, limit, retry_errors=False, missing_desc=False):
     """enrich 対象の shop 行を返す。"""
     threshold = (
         dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=max_age_days)
@@ -26,6 +26,10 @@ def select_targets(conn, max_age_days, limit, retry_errors=False):
     error_clause = (
         " OR (j.fetch_error IS NOT NULL AND j.fetch_error != '')"
         if retry_errors else ""
+    )
+    missing_clause = (
+        " OR j.shop_description IS NULL OR length(j.shop_description) < 10"
+        if missing_desc else ""
     )
     q = f"""
     SELECT s.id, s.name, s.address, s.pc_url, s.raw_json
@@ -35,7 +39,8 @@ def select_targets(conn, max_age_days, limit, retry_errors=False):
       AND (j.shop_id IS NULL
        OR j.enriched_at < ?
        OR s.fetched_at > j.enriched_at
-       {error_clause})
+       {error_clause}
+       {missing_clause})
     ORDER BY j.enriched_at IS NULL DESC, j.enriched_at ASC
     """
     if limit > 0:
@@ -89,10 +94,13 @@ def main():
     ap.add_argument("--delay", type=float, default=0.3)
     ap.add_argument("--retry-errors", action="store_true",
                     help="fetch_error が残っている店も対象に含めて再取得")
+    ap.add_argument("--missing-desc", action="store_true",
+                    help="shop_description が未取得（NULL/空）の店も対象に含める")
     args = ap.parse_args()
 
     conn = dbmod.connect(args.db)
-    targets = select_targets(conn, args.max_age_days, args.limit, args.retry_errors)
+    targets = select_targets(conn, args.max_age_days, args.limit,
+                             args.retry_errors, args.missing_desc)
     print(f"enrich 対象: {len(targets)}件", file=sys.stderr)
     if not targets:
         return
