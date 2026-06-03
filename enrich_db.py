@@ -31,10 +31,11 @@ def select_targets(conn, max_age_days, limit, retry_errors=False):
     SELECT s.id, s.name, s.address, s.pc_url, s.raw_json
     FROM shops s
     LEFT JOIN judgements j ON j.shop_id = s.id
-    WHERE j.shop_id IS NULL
+    WHERE s.source = 'hotpepper'
+      AND (j.shop_id IS NULL
        OR j.enriched_at < ?
        OR s.fetched_at > j.enriched_at
-       {error_clause}
+       {error_clause})
     ORDER BY j.enriched_at IS NULL DESC, j.enriched_at ASC
     """
     if limit > 0:

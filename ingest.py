@@ -76,6 +76,7 @@ def upsert_shop(conn, s, now):
         "capacity": s.get("capacity", ""),
         "party_capacity": s.get("party_capacity", ""),
         "raw_json": new_raw,
+        "source": "hotpepper",
         "last_seen_at": now,
         "fetched_at": now,
     }

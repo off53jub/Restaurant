@@ -99,6 +99,17 @@ enrich_db.py → 未enrich/期限切れの店だけページ取得して judgeme
 query.py   → プリセット or アドホック条件 + FTS全文検索で抽出
 ```
 
+### データソース（複数対応）
+
+`shops.source` 列でソースを区別。同一店が複数ソースにある場合は ID プレフィックスで分離（HotPepper: `J...`、ぐるなび: `g:...`）。
+
+| ソース | 取得方法 | enrich対応 | カバー特徴 |
+|---|---|---|---|
+| HotPepper | `make ingest` (要 `HOTPEPPER_API_KEY`) | ✓ | 居酒屋・チェーン・予約・クーポン主体 |
+| ぐるなび | `make ingest-gnavi` (要 `GNAVI_API_KEY`) | スタブのみ | 高級店・ホテル系もカバー、API メタのみ |
+
+ぐるなびはAPIメタデータ（名前・住所・カテゴリ・予算上限）まで取得し、雰囲気スコアやインスタ判定は持たない。そのためエリア検索/FTS検索には引っかかるが、`--scene` や `--calm-min` でのフィルタには出てこない。
+
 ### 初回構築
 
 DB は GitHub Release アセット (`db-snapshot/shops.db.gz`) に永続化されます。

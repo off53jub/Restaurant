@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS shops (
     capacity TEXT,
     party_capacity TEXT,
     raw_json TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'hotpepper',
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     fetched_at TEXT NOT NULL
@@ -136,8 +137,20 @@ def connect(path):
     return conn
 
 
+def migrate(conn):
+    """既存DBに対する非破壊マイグレーション。新規列の追加など。"""
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(shops)").fetchall()]
+    if "source" not in cols:
+        # 既存行は HotPepper 由来とみなす
+        conn.execute("ALTER TABLE shops ADD COLUMN source TEXT NOT NULL DEFAULT 'hotpepper'")
+    # source 列確定後にインデックス作成
+    conn.execute("CREATE INDEX IF NOT EXISTS shops_source ON shops(source)")
+    conn.commit()
+
+
 def init_db(path):
     conn = connect(path)
     conn.executescript(SCHEMA)
+    migrate(conn)
     conn.commit()
     return conn
