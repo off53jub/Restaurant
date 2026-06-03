@@ -42,19 +42,31 @@ ENDPOINT = "https://places.googleapis.com/v1/places:searchText"
 FIELD_MASK = "places.id,places.rating,places.userRatingCount,places.priceLevel,places.businessStatus,places.types"
 
 
-def fetch_place(api_key, name, address, retries=2, backoff=2.0):
-    """店名＋住所で検索し、最良一致の評価を返す。"""
+def fetch_place(api_key, name, address, lat=None, lng=None, retries=2, backoff=2.0):
+    """店名＋住所で検索し、最良一致の評価を返す。
+
+    address が薄い OSM 店向けに、lat/lng が渡されたら locationBias を付けて精度UP。
+    """
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
         "X-Goog-FieldMask": FIELD_MASK,
     }
+    query_addr = (address or "").strip()
     body = {
-        "textQuery": f"{name} {address}",
+        "textQuery": f"{name} {query_addr}".strip() if query_addr else name,
         "languageCode": "ja",
         "regionCode": "JP",
         "pageSize": 1,  # 最良1件のみ
     }
+    if lat is not None and lng is not None:
+        # 500m圏で最も近い一致を優先（OSM 由来の name 多義性対策）
+        body["locationBias"] = {
+            "circle": {
+                "center": {"latitude": float(lat), "longitude": float(lng)},
+                "radius": 500.0,
+            }
+        }
     last_err = None
     for attempt in range(retries + 1):
         try:
@@ -128,11 +140,19 @@ def select_targets(conn, args):
         where.append(f"s.id IN ({ph})"); params.extend(args.ids)
     elif args.visited_only:
         where.append("EXISTS (SELECT 1 FROM visits v WHERE v.shop_id = s.id)")
+    elif args.osm_unique:
+        # OSM固有(HotPepperと座標+名前で重複しない)＆連絡先ありの店だけ
+        where.append("s.source='osm' AND s.lat IS NOT NULL")
+        where.append(
+            "NOT EXISTS (SELECT 1 FROM shops h WHERE h.source='hotpepper' "
+            "AND h.lat IS NOT NULL "
+            "AND ABS(h.lat - s.lat) < 0.0005 AND ABS(h.lng - s.lng) < 0.0005)"
+        )
     elif args.all:
         if not args.confirm:
             raise SystemExit("--all は --confirm 必須（高コスト）")
     else:
-        raise SystemExit("--from-stdin / --ids / --visited-only / --all のいずれかを指定")
+        raise SystemExit("--from-stdin / --ids / --visited-only / --osm-unique / --all のいずれかを指定")
 
     # キャッシュ: max_age 内に正常取得済みは除外
     where.append(
@@ -140,7 +160,7 @@ def select_targets(conn, args):
         "AND g.fetched_at >= ? AND (g.fetch_error IS NULL OR g.fetch_error=''))"
     )
     params.append(threshold)
-    sql = f"SELECT s.id, s.name, s.address FROM shops s WHERE {' AND '.join(where)}"
+    sql = f"SELECT s.id, s.name, s.address, s.lat, s.lng FROM shops s WHERE {' AND '.join(where)}"
     return list(conn.execute(sql, params))
 
 
@@ -152,6 +172,8 @@ def main():
     src.add_argument("--visited-only", action="store_true")
     src.add_argument("--from-stdin", action="store_true",
                      help="query.py --format json の出力をパイプ")
+    src.add_argument("--osm-unique", action="store_true",
+                     help="OSM固有(HPと重複しない)個人店だけGoogle照合")
     src.add_argument("--all", action="store_true", help="高コスト警告")
     ap.add_argument("--confirm", action="store_true")
     ap.add_argument("--max-age-days", type=int, default=90)
@@ -177,7 +199,7 @@ def main():
 
     ok_n = err_n = 0
     for i, t in enumerate(targets, 1):
-        data = fetch_place(api_key, t["name"], t["address"])
+        data = fetch_place(api_key, t["name"], t["address"], t["lat"], t["lng"])
         now = dt.datetime.now(dt.timezone.utc).isoformat()
         upsert(conn, t["id"], data, now)
         if data.get("error"):

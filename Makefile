@@ -1,4 +1,4 @@
-.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich pull-db push-db push-db-seed
+.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich osm-gap pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -61,6 +61,10 @@ recommend:
 # Google評価取得（要GOOGLE_PLACES_API_KEY） 例: make google-enrich ARGS="--visited-only"
 google-enrich:
 	$(PY) google_enrich.py --db $(DB) $(ARGS)
+
+# OSM固有(HotPepper未掲載)店のHTML発掘 例: make osm-gap AREA=港区 OUT=out/gap.html
+osm-gap:
+	$(PY) osm_gap.py --db $(DB) --area $(AREA) --out $(OUT)
 
 # 月次差分: 全店再 fetch + 30日超のみ enrich
 refresh: ingest enrich
