@@ -82,6 +82,23 @@ CREATE TABLE IF NOT EXISTS google (
 CREATE INDEX IF NOT EXISTS google_rating ON google(rating);
 CREATE INDEX IF NOT EXISTS google_reviews ON google(user_ratings_total);
 
+-- Google Places API 等で取得した口コミ。1店舗に複数行。
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+    source TEXT NOT NULL DEFAULT 'google',
+    author TEXT,
+    rating REAL,
+    text TEXT,
+    language TEXT,
+    relative_time TEXT,                -- "2 months ago" 等
+    publish_time TEXT,                 -- ISO8601 (あれば)
+    fetched_at TEXT NOT NULL,
+    UNIQUE(shop_id, source, author, text)
+);
+CREATE INDEX IF NOT EXISTS reviews_shop_id ON reviews(shop_id);
+CREATE INDEX IF NOT EXISTS reviews_rating ON reviews(rating);
+
 -- 公式サイトから抽出した SNS アカウントと OG メタ情報（任意機能）。
 -- enrich_social.py で OSMの website / HPの公式リンクから取得・キャッシュ。
 CREATE TABLE IF NOT EXISTS social (

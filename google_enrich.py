@@ -40,17 +40,21 @@ load_dotenv()
 ENDPOINT = "https://places.googleapis.com/v1/places:searchText"
 # 取得フィールド（コスト最小化のため最小限）
 FIELD_MASK = "places.id,places.rating,places.userRatingCount,places.priceLevel,places.businessStatus,places.types"
+# レビュー取込時に追加するフィールド（Atmosphere SKU=高めなので opt-in）
+FIELD_MASK_REVIEWS = FIELD_MASK + ",places.reviews,places.displayName"
 
 
-def fetch_place(api_key, name, address, lat=None, lng=None, retries=2, backoff=2.0):
+def fetch_place(api_key, name, address, lat=None, lng=None, retries=2, backoff=2.0,
+                with_reviews=False):
     """店名＋住所で検索し、最良一致の評価を返す。
 
     address が薄い OSM 店向けに、lat/lng が渡されたら locationBias を付けて精度UP。
+    with_reviews=True で口コミも取得（Atmosphere SKU、~$25/1000）。
     """
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": FIELD_MASK,
+        "X-Goog-FieldMask": FIELD_MASK_REVIEWS if with_reviews else FIELD_MASK,
     }
     query_addr = (address or "").strip()
     body = {
@@ -79,7 +83,7 @@ def fetch_place(api_key, name, address, lat=None, lng=None, retries=2, backoff=2
             if not places:
                 return {"error": "no match"}
             p = places[0]
-            return {
+            result = {
                 "place_id": p.get("id"),
                 "rating": p.get("rating"),
                 "user_ratings_total": p.get("userRatingCount"),
@@ -87,6 +91,9 @@ def fetch_place(api_key, name, address, lat=None, lng=None, retries=2, backoff=2
                 "business_status": p.get("businessStatus"),
                 "types_json": json.dumps(p.get("types", [])),
             }
+            if with_reviews:
+                result["reviews"] = _parse_reviews(p.get("reviews") or [])
+            return result
         except Exception as e:
             last_err = e
             if attempt < retries:
@@ -99,6 +106,23 @@ def _price_level_to_int(s):
     return {"PRICE_LEVEL_FREE": 0, "PRICE_LEVEL_INEXPENSIVE": 1,
             "PRICE_LEVEL_MODERATE": 2, "PRICE_LEVEL_EXPENSIVE": 3,
             "PRICE_LEVEL_VERY_EXPENSIVE": 4}.get(s)
+
+
+def _parse_reviews(raw):
+    """Places API (New) のレビュー配列をDB保存用に正規化。"""
+    out = []
+    for rv in raw:
+        text_obj = rv.get("text") or rv.get("originalText") or {}
+        author = (rv.get("authorAttribution") or {}).get("displayName")
+        out.append({
+            "author": author,
+            "rating": rv.get("rating"),
+            "text": text_obj.get("text", ""),
+            "language": text_obj.get("languageCode"),
+            "relative_time": rv.get("relativePublishTimeDescription"),
+            "publish_time": rv.get("publishTime"),
+        })
+    return out
 
 
 def upsert(conn, shop_id, data, now):
@@ -121,6 +145,22 @@ def upsert(conn, shop_id, data, now):
         f"ON CONFLICT(shop_id) DO UPDATE SET {sets}",
         cols,
     )
+    # レビューがあれば reviews テーブルへ。UNIQUE で重複排除。
+    for rv in data.get("reviews") or []:
+        if not rv.get("text"):
+            continue
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO reviews "
+                "(shop_id, source, author, rating, text, language, "
+                " relative_time, publish_time, fetched_at) "
+                "VALUES (?, 'google', ?, ?, ?, ?, ?, ?, ?)",
+                (shop_id, rv.get("author"), rv.get("rating"), rv["text"],
+                 rv.get("language"), rv.get("relative_time"),
+                 rv.get("publish_time"), now),
+            )
+        except Exception:
+            pass
 
 
 def select_targets(conn, args):
@@ -179,6 +219,8 @@ def main():
     ap.add_argument("--max-age-days", type=int, default=90)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--delay", type=float, default=0.1, help="リクエスト間スリープ秒")
+    ap.add_argument("--with-reviews", action="store_true",
+                    help="口コミも取得（Atmosphere SKU、約$25/1000）")
     args = ap.parse_args()
 
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
@@ -199,7 +241,8 @@ def main():
 
     ok_n = err_n = 0
     for i, t in enumerate(targets, 1):
-        data = fetch_place(api_key, t["name"], t["address"], t["lat"], t["lng"])
+        data = fetch_place(api_key, t["name"], t["address"], t["lat"], t["lng"],
+                           with_reviews=args.with_reviews)
         now = dt.datetime.now(dt.timezone.utc).isoformat()
         upsert(conn, t["id"], data, now)
         if data.get("error"):
