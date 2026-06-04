@@ -1,4 +1,4 @@
-.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich social-enrich reviews wiki-enrich osm-gap pull-db push-db push-db-seed
+.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich social-enrich reviews wiki-enrich hp-reviews geo-enrich youtube-enrich foods osm-gap pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -73,6 +73,22 @@ reviews:
 # Wikidata/Wikipedia 連携 例: make wiki-enrich ARGS="--visited-only"
 wiki-enrich:
 	$(PY) enrich_wiki.py --db $(DB) $(ARGS)
+
+# HotPepperページの口コミ・件数・シーン別を取得（無料・現行スクレイプと同根拠）
+hp-reviews:
+	$(PY) enrich_reviews_hotpepper.py --db $(DB) $(ARGS)
+
+# 緯度経度→区名 逆ジオコーディング（OSM店の区不明を埋める） 例: ARGS="--source osm"
+geo-enrich:
+	$(PY) enrich_geo.py --db $(DB) $(ARGS)
+
+# YouTube話題度（要YOUTUBE_API_KEY） 例: ARGS="--visited-only"
+youtube-enrich:
+	$(PY) enrich_youtube.py --db $(DB) $(ARGS)
+
+# FOODSオープンデータCSV取込 例: make foods CSV=~/Downloads/tokyo.csv
+foods:
+	$(PY) ingest_foods.py --db $(DB) --csv $(CSV)
 
 # OSM固有(HotPepper未掲載)店のHTML発掘 例: make osm-gap AREA=港区 OUT=out/gap.html
 osm-gap:

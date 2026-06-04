@@ -195,10 +195,21 @@ def migrate(conn):
         conn.execute("ALTER TABLE shops ADD COLUMN source TEXT NOT NULL DEFAULT 'hotpepper'")
     # source 列確定後にインデックス作成
     conn.execute("CREATE INDEX IF NOT EXISTS shops_source ON shops(source)")
-    # judgements に shop_description 列を追加（既存DB向け）
+    # judgements に後付け列を追加（既存DB向け）
     jcols = [r["name"] for r in conn.execute("PRAGMA table_info(judgements)").fetchall()]
-    if jcols and "shop_description" not in jcols:
-        conn.execute("ALTER TABLE judgements ADD COLUMN shop_description TEXT")
+    if jcols:
+        for col, decl in [
+            ("shop_description", "TEXT"),
+            ("hotpepper_review_count", "INTEGER"),
+            ("hotpepper_review_scenes", "TEXT"),
+            ("hp_review_fetched_at", "TEXT"),
+            ("youtube_video_count", "INTEGER"),
+            ("youtube_top_views", "INTEGER"),
+            ("youtube_fetched_at", "TEXT"),
+            ("ward", "TEXT"),  # 逆ジオコーディング結果
+        ]:
+            if col not in jcols:
+                conn.execute(f"ALTER TABLE judgements ADD COLUMN {col} {decl}")
     conn.commit()
 
 
