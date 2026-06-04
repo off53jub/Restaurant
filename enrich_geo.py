@@ -65,6 +65,7 @@ def main():
     args = ap.parse_args()
 
     conn = dbmod.init_db(args.db)
+    conn.execute("PRAGMA busy_timeout=60000")  # 書き込み競合時に最大60秒待つ
     where = ["(j.ward IS NULL OR j.ward = '')"]
     params = []
     if args.source:
