@@ -18,7 +18,8 @@ import db as dbmod
 from enrich import judge_shop, Judgement
 
 
-def select_targets(conn, max_age_days, limit, retry_errors=False, missing_desc=False):
+def select_targets(conn, max_age_days, limit, retry_errors=False,
+                   missing_desc=False, desc_cutoff=None):
     """enrich 対象の shop 行を返す。"""
     threshold = (
         dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=max_age_days)
@@ -27,10 +28,15 @@ def select_targets(conn, max_age_days, limit, retry_errors=False, missing_desc=F
         " OR (j.fetch_error IS NOT NULL AND j.fetch_error != '')"
         if retry_errors else ""
     )
-    missing_clause = (
-        " OR j.shop_description IS NULL OR length(j.shop_description) < 10"
-        if missing_desc else ""
-    )
+    # shop_description 未処理 = NULL（''は処理済みでdescなしを意味するので除外）。
+    # desc_cutoff 指定時は、それより前に enrich された店だけを対象にして
+    # 直近バックフィル分の二度打ちを防ぐ。
+    if missing_desc and desc_cutoff:
+        missing_clause = f" OR (j.shop_description IS NULL AND j.enriched_at < '{desc_cutoff}')"
+    elif missing_desc:
+        missing_clause = " OR j.shop_description IS NULL"
+    else:
+        missing_clause = ""
     q = f"""
     SELECT s.id, s.name, s.address, s.pc_url, s.raw_json
     FROM shops s
@@ -70,7 +76,9 @@ def upsert_judgement(conn, shop_id, j: Judgement, now: str):
         "atmosphere_special": d["atmosphere_special"],
         "instagram_score": d["instagram_score"],
         "instagram_hits_json": json.dumps(d["instagram_hits"], ensure_ascii=False),
-        "shop_description": d.get("shop_description") or None,
+        # fetch成功なら空文字でも保持（処理済みの印）。失敗時のみNULL。
+        "shop_description": (d.get("shop_description") or "")
+                            if not d.get("fetch_error") else None,
         "fetch_error": d["fetch_error"],
         "enriched_at": now,
     }
@@ -95,12 +103,14 @@ def main():
     ap.add_argument("--retry-errors", action="store_true",
                     help="fetch_error が残っている店も対象に含めて再取得")
     ap.add_argument("--missing-desc", action="store_true",
-                    help="shop_description が未取得（NULL/空）の店も対象に含める")
+                    help="shop_description が未取得（NULL）の店も対象に含める")
+    ap.add_argument("--desc-cutoff",
+                    help="missing-desc時、この日時より前にenrichした店だけ対象(ISO8601)")
     args = ap.parse_args()
 
     conn = dbmod.connect(args.db)
     targets = select_targets(conn, args.max_age_days, args.limit,
-                             args.retry_errors, args.missing_desc)
+                             args.retry_errors, args.missing_desc, args.desc_cutoff)
     print(f"enrich 対象: {len(targets)}件", file=sys.stderr)
     if not targets:
         return
