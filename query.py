@@ -159,18 +159,37 @@ def build_where(preset, area_kw=None, fts=None, price_min=None, price_max=None,
         if grev is not None:
             where.append("EXISTS (SELECT 1 FROM google g WHERE g.shop_id=s.id AND g.user_ratings_total >= ?)")
             args.append(grev)
+        # 最近行った店を除外（接待で同じ人を短期間で同じ店に連れて行かない）
+        nvs = kwargs_extras.get("not_visited_since_days")
+        if nvs is not None:
+            where.append(
+                "NOT EXISTS (SELECT 1 FROM visits v WHERE v.shop_id=s.id "
+                "AND v.visited_at >= date('now', ?))"
+            )
+            args.append(f"-{int(nvs)} days")
+        # 特定同席者と既に行った店を除外（接待相手の被り回避）
+        ncw = kwargs_extras.get("not_with_companion")
+        if ncw:
+            where.append(
+                "NOT EXISTS (SELECT 1 FROM visits v WHERE v.shop_id=s.id "
+                "AND v.companions LIKE ?)"
+            )
+            args.append(f"%{ncw}%")
     # 取得失敗除外
     where.append("(j.fetch_error IS NULL OR j.fetch_error = '')")
     return where, args, has_price_filter, (pmin, pmax), fts
 
 
 def query(conn, preset_name=None, scene=None, sort=None, visited=None,
-          google_min=None, google_reviews_min=None, **kwargs):
+          google_min=None, google_reviews_min=None,
+          not_visited_since_days=None, not_with_companion=None, **kwargs):
     preset = PRESETS.get(preset_name) if preset_name else None
     where, args, has_price, price_band, fts = build_where(
         preset,
         kwargs_extras={"visited": visited, "google_min": google_min,
-                       "google_reviews_min": google_reviews_min},
+                       "google_reviews_min": google_reviews_min,
+                       "not_visited_since_days": not_visited_since_days,
+                       "not_with_companion": not_with_companion},
         **kwargs,
     )
     scene = scene or (preset.get("scene") if preset else None)
@@ -329,6 +348,10 @@ def main():
     vg = ap.add_mutually_exclusive_group()
     vg.add_argument("--visited", action="store_true", help="訪問済みの店のみ")
     vg.add_argument("--unvisited", action="store_true", help="未訪問の店のみ")
+    ap.add_argument("--not-visited-since", type=int, metavar="DAYS",
+                    help="この日数以内に行った店は除外（接待で同店連れて行かない用）")
+    ap.add_argument("--not-with-companion", metavar="NAME",
+                    help="この人と既に行った店は除外（companion文字列部分一致）")
     ap.add_argument("--with-nijikai", action="store_true",
                     help="各候補の徒歩圏で2次会候補を表示")
     ap.add_argument("--nijikai-distance", type=int, default=600,
@@ -382,6 +405,8 @@ def main():
         visited=visited_flag,
         google_min=args.google_min,
         google_reviews_min=args.google_reviews_min,
+        not_visited_since_days=args.not_visited_since,
+        not_with_companion=args.not_with_companion,
         area_kw=args.area,
         fts=args.fts,
         price_min=args.price_min,

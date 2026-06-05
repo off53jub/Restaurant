@@ -12,6 +12,41 @@ import json
 import db as dbmod
 from query import query, row_fit
 import nijikai
+from reviews import extract_themes, pick_representative
+
+
+def reviews_block_html(conn, shop_id, max_themes=4, max_picks=2):
+    """指定店のHotPepper口コミからテーマ集計＋代表口コミをHTML化。"""
+    rows = list(conn.execute(
+        "SELECT text, rating, author, relative_time FROM reviews "
+        "WHERE shop_id=? AND text IS NOT NULL AND length(text) >= 15 "
+        "ORDER BY length(text) DESC LIMIT 50",
+        (shop_id,),
+    ))
+    if not rows:
+        return ""
+    texts = [r["text"] for r in rows]
+    theme_hits, examples = extract_themes(texts)
+    picks = pick_representative([dict(r) for r in rows], max_picks)
+
+    e = html.escape
+    theme_html = ""
+    if theme_hits:
+        items = []
+        for cat, n in theme_hits.most_common(max_themes):
+            items.append(f'<span class="theme">{e(cat)} <b>{n}</b></span>')
+        theme_html = '<div class="themes">' + "".join(items) + '</div>'
+
+    pick_html = ""
+    for pk in picks:
+        body = (pk["text"] or "").replace("\n", " ")[:130]
+        ellipsis = "…" if len(pk["text"] or "") > 130 else ""
+        pick_html += f'<div class="rev-pick">「{e(body)}{ellipsis}」</div>'
+
+    return (f'<details class="rev-block">'
+            f'<summary>💬 口コミ {len(rows)}本のテーマと代表</summary>'
+            f'<div class="rev-body">{theme_html}{pick_html}</div>'
+            f'</details>')
 
 
 def photo_url(raw_json):
@@ -51,7 +86,7 @@ def nijikai_block_html(cands):
     return f'<div class="nijikai"><div class="nk-label">2次会候補</div>{"".join(items)}</div>'
 
 
-def card_html(idx, r, price_band, scene, nijikai_cands=None):
+def card_html(idx, r, price_band, scene, nijikai_cands=None, reviews_html=""):
     e = html.escape
     drink_prices = json.loads(r["drink_course_prices_json"] or "[]")
     # 店舗紹介 (raw_jsonから)
@@ -129,12 +164,14 @@ def card_html(idx, r, price_band, scene, nijikai_cands=None):
     </div>
     {sns_html}
     {desc_html}
+    {reviews_html}
     {nijikai_html}
   </div>
 </div>"""
 
 
-def build_html(rows, title, price_band, scene, conn=None, nijikai_opts=None):
+def build_html(rows, title, price_band, scene, conn=None, nijikai_opts=None,
+               with_reviews=False):
     markers = []
     cards = []
     for i, r in enumerate(rows, 1):
@@ -146,7 +183,10 @@ def build_html(rows, title, price_band, scene, conn=None, nijikai_opts=None):
                 limit=nijikai_opts["limit"],
                 exclude_shop_id=r["id"],
             )
-        cards.append(card_html(i, r, price_band, scene, nk))
+        rev_html = ""
+        if conn is not None and with_reviews:
+            rev_html = reviews_block_html(conn, r["id"])
+        cards.append(card_html(i, r, price_band, scene, nk, rev_html))
         if r["lat"] and r["lng"]:
             fit = row_fit(r, scene, price_band)
             markers.append({
@@ -203,6 +243,13 @@ def build_html(rows, title, price_band, scene, conn=None, nijikai_opts=None):
  .desc-block{{margin-top:8px;font-size:12px;color:#444}}
  .desc-block summary{{cursor:pointer;color:#1a4ed8;font-weight:600;font-size:11.5px}}
  .desc-body{{margin-top:6px;line-height:1.55;background:#fffdf7;border-left:3px solid #f0c040;padding:7px 10px;border-radius:4px;color:#333}}
+ .rev-block{{margin-top:6px;font-size:12px;color:#444}}
+ .rev-block summary{{cursor:pointer;color:#1a4ed8;font-weight:600;font-size:11.5px}}
+ .rev-body{{margin-top:6px;background:#f6f9fc;border-left:3px solid #6ab0ff;padding:7px 10px;border-radius:4px}}
+ .themes{{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px}}
+ .theme{{font-size:11px;background:#fff;border:1px solid #d0e0ff;border-radius:10px;padding:1px 8px;color:#234}}
+ .theme b{{color:#1a4ed8;margin-left:3px}}
+ .rev-pick{{font-size:12px;color:#444;margin-top:4px;line-height:1.45;font-style:italic}}
 </style></head><body>
 <header><h1>{html.escape(title)}</h1><div class="sub">{len(rows)}件 ・ 適合度＝シーン複合スコア ・ ピンクリックでカードへ</div></header>
 <div id="map"></div>
@@ -246,6 +293,8 @@ def main():
                     help="各候補の徒歩圏で2次会候補をカード内に表示")
     ap.add_argument("--nijikai-distance", type=int, default=600)
     ap.add_argument("--nijikai-limit", type=int, default=3)
+    ap.add_argument("--with-reviews", action="store_true",
+                    help="HotPepper口コミのテーマ集計＋代表口コミをカードに埋め込む")
     args = ap.parse_args()
 
     conn = dbmod.connect(args.db)
@@ -262,7 +311,8 @@ def main():
     title = args.title or (preset["description"] if preset else "レストラン候補")
     nk_opts = ({"distance": args.nijikai_distance, "limit": args.nijikai_limit}
                if args.with_nijikai else None)
-    htmls = build_html(rows, title, price_band, scene, conn=conn, nijikai_opts=nk_opts)
+    htmls = build_html(rows, title, price_band, scene, conn=conn,
+                       nijikai_opts=nk_opts, with_reviews=args.with_reviews)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(htmls)
     print(f"{args.out} を生成（{len(rows)}件）")

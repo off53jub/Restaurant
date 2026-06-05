@@ -1,24 +1,30 @@
 """シーン別の複合適合スコア（0-100）。
 
 キーワード出現数だけに頼らず、HotPepper自身の雰囲気スライダー（操作されにくい）・
-価格適合・個室有無などを加重平均して算出する。
+価格適合・個室有無に加え、口コミシーン別件数（実際にそのシーンで使われた実績）
+も加重平均して算出する。
 """
+import json
 from typing import Optional
 
 
 # 各シーンの重み（合計1.0）と価格ターゲット帯
+# kaishoku_actual/date_actual は HotPepper口コミの「接待/デート件数」を
+# 実績指標として使う（キーワードより操作されにくい）
 SCENE_PROFILES = {
     "kaishoku": {
         "weights": {
-            "calm": 0.28, "special": 0.14, "price_fit": 0.18,
-            "private": 0.22, "mid_room": 0.10, "kaishoku": 0.08,
+            "calm": 0.22, "special": 0.12, "price_fit": 0.15,
+            "private": 0.18, "mid_room": 0.08, "kaishoku": 0.05,
+            "kaishoku_actual": 0.20,
         },
         "price_target": (7500, 8800),
     },
     "date": {
         "weights": {
-            "calm": 0.30, "special": 0.30, "price_fit": 0.15,
-            "private": 0.10, "instagram": 0.15,
+            "calm": 0.25, "special": 0.25, "price_fit": 0.13,
+            "private": 0.08, "instagram": 0.14,
+            "date_actual": 0.15,
         },
         "price_target": (5000, 8000),
     },
@@ -65,6 +71,17 @@ def _component(name, j, prices, target):
         return min((_get(j, "instagram_score") or 0) / 8.0, 1.0)
     if name == "kaishoku":
         return min((_get(j, "kaishoku_score") or 0) / 10.0, 1.0)
+    if name in ("kaishoku_actual", "date_actual"):
+        scenes_json = _get(j, "hotpepper_review_scenes")
+        if not scenes_json:
+            return 0.0
+        try:
+            scenes = json.loads(scenes_json)
+        except (TypeError, ValueError):
+            return 0.0
+        key = "kaishoku" if name == "kaishoku_actual" else "date"
+        # 30件で1.0飽和（接待90件級は満点扱い）
+        return min(scenes.get(key, 0) / 30.0, 1.0)
     if name == "price_fit":
         return price_fit(prices, *target)
     return 0.0

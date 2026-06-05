@@ -27,15 +27,20 @@ WARD_RE = re.compile(
 
 
 def build_profile(conn, min_rating=4, scene=None):
-    """好み(★min_rating+)のプロファイルを返す。"""
+    """好み(★min_rating+)のプロファイルを返す。
+
+    雰囲気/価格に加え、HotPepper口コミ実績シーンの傾向も学習。
+    """
     where = "v.rating >= ? AND v.shop_id IS NOT NULL"
     params = [min_rating]
     if scene:
         where += " AND v.scene = ?"
         params.append(scene)
     rows = list(conn.execute(
-        f"SELECT s.genre_name, s.address, j.atmosphere_calm, j.atmosphere_special, "
-        f"       j.drink_course_prices_json, v.cost_per_person "
+        f"SELECT s.genre_name, s.address, "
+        f"       j.atmosphere_calm, j.atmosphere_special, "
+        f"       j.drink_course_prices_json, j.hotpepper_review_scenes, "
+        f"       v.cost_per_person, v.scene AS visit_scene "
         f"FROM visits v "
         f"JOIN shops s ON s.id = v.shop_id "
         f"JOIN judgements j ON j.shop_id = s.id "
@@ -56,13 +61,36 @@ def build_profile(conn, min_rating=4, scene=None):
     specs = [r["atmosphere_special"] for r in rows if r["atmosphere_special"] is not None]
     costs = [r["cost_per_person"] for r in rows if r["cost_per_person"]]
 
+    # 訪問シーン頻度（kaishoku/date/...）
+    scene_counts = Counter(r["visit_scene"] for r in rows if r["visit_scene"])
+    # 好きな店の hotpepper_review_scenes 平均
+    review_scene_avg = {}
+    if rows:
+        scene_totals = {}
+        scene_n = {}
+        for r in rows:
+            if not r["hotpepper_review_scenes"]:
+                continue
+            try:
+                sc = json.loads(r["hotpepper_review_scenes"])
+            except (TypeError, ValueError):
+                continue
+            for k, n in sc.items():
+                scene_totals[k] = scene_totals.get(k, 0) + n
+                scene_n[k] = scene_n.get(k, 0) + 1
+        review_scene_avg = {
+            k: scene_totals[k] / scene_n[k] for k in scene_totals
+        }
+
     return {
         "sample_size": len(rows),
-        "genre_pref": dict(genre_counts),       # 'g': N
+        "genre_pref": dict(genre_counts),
         "ward_pref": dict(ward_counts),
         "calm_mean": (sum(calms) / len(calms)) if calms else None,
         "special_mean": (sum(specs) / len(specs)) if specs else None,
         "cost_mean": (sum(costs) / len(costs)) if costs else None,
+        "visit_scene_pref": dict(scene_counts),
+        "review_scene_avg": review_scene_avg,
     }
 
 
@@ -96,6 +124,25 @@ def score_shop(shop_row, judg_row, profile):
         if prices:
             nearest = min(prices, key=lambda p: abs(p - profile["cost_mean"]))
             parts.append(max(0.0, 1.0 - abs(nearest - profile["cost_mean"]) / 5000.0))
+
+    # 口コミ実績シーンの近さ（好きな店が「接待実績豊富」なら、未訪問店も同様か）
+    rsa = profile.get("review_scene_avg") or {}
+    if rsa and judg_row["hotpepper_review_scenes"]:
+        try:
+            sc = json.loads(judg_row["hotpepper_review_scenes"])
+        except (TypeError, ValueError):
+            sc = {}
+        # ユーザーが好む店の平均接待件数とどれだけ近いか
+        sims = []
+        for k, mean_n in rsa.items():
+            if mean_n <= 0:
+                continue
+            their_n = sc.get(k, 0)
+            # 1.0 - 比率差/2（同じ件数なら1、倍違いで0.5）
+            ratio = min(their_n, mean_n) / max(their_n, mean_n, 1)
+            sims.append(ratio)
+        if sims:
+            parts.append(sum(sims) / len(sims))
 
     if not parts:
         return 0.0

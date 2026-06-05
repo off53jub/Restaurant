@@ -25,10 +25,12 @@ def test_price_fit_far_is_zero():
 
 
 def test_composite_perfect_kaishoku():
+    """全成分パーフェクト（接待実績含む）で100点満点。"""
     j = {
         "atmosphere_calm": 100, "atmosphere_special": 100,
         "fully_private_room": 1, "mid_room_ok": 1,
         "instagram_score": 8, "kaishoku_score": 10,
+        "hotpepper_review_scenes": '{"kaishoku":30}',
     }
     s = score.composite_score(j, [8000], "kaishoku")
     assert s == 100.0
@@ -58,6 +60,44 @@ def test_composite_accepts_dict_keys():
     j = {"atmosphere_calm": 80, "atmosphere_special": 60}
     s = score.composite_score(j, [6000], "date")
     assert 0 < s <= 100
+
+
+def test_kaishoku_actual_lifts_score():
+    """口コミシーン接待件数があると kaishoku 適合度が大きく上がる。"""
+    base = {"atmosphere_calm": 70, "atmosphere_special": 50,
+            "fully_private_room": 1, "mid_room_ok": 1,
+            "instagram_score": 0, "kaishoku_score": 5,
+            "hotpepper_review_scenes": None}
+    s_no = score.composite_score(base, [8000], "kaishoku")
+    base_with = dict(base, hotpepper_review_scenes='{"kaishoku":90}')
+    s_yes = score.composite_score(base_with, [8000], "kaishoku")
+    assert s_yes > s_no
+    # 90件は飽和（30件で1.0）
+    base_30 = dict(base, hotpepper_review_scenes='{"kaishoku":30}')
+    assert score.composite_score(base_30, [8000], "kaishoku") == s_yes
+
+
+def test_date_actual_uses_date_count_only():
+    """date シーンは kaishoku_actual ではなく date 件数を見る。"""
+    j_kaishoku_only = {"atmosphere_calm": 80, "atmosphere_special": 70,
+                       "fully_private_room": 0, "instagram_score": 3,
+                       "kaishoku_score": 0,
+                       "hotpepper_review_scenes": '{"kaishoku":50,"date":0}'}
+    j_date_only = dict(j_kaishoku_only,
+                       hotpepper_review_scenes='{"kaishoku":0,"date":50}')
+    s_k = score.composite_score(j_kaishoku_only, [6000], "date")
+    s_d = score.composite_score(j_date_only, [6000], "date")
+    assert s_d > s_k
+
+
+def test_actual_handles_bad_json():
+    j = {"atmosphere_calm": 50, "atmosphere_special": 30,
+         "fully_private_room": 1, "mid_room_ok": 1,
+         "instagram_score": 0, "kaishoku_score": 0,
+         "hotpepper_review_scenes": "not-json"}
+    # 例外で落ちず、actual 成分が 0 扱いになる
+    s = score.composite_score(j, [8000], "kaishoku")
+    assert 0 < s < 100
 
 
 def test_price_target_override():

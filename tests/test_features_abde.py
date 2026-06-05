@@ -122,6 +122,24 @@ def test_build_profile_aggregates_visits():
     assert p["cost_mean"] == 8000
 
 
+def test_build_profile_captures_review_scene_avg():
+    """好きな店のHotPepper口コミシーン平均が profile に入る。"""
+    db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+    conn = dbmod.init_db(db)
+    _seed_shop(conn, "S1", genre="和食")
+    _seed_shop(conn, "S2", genre="和食")
+    # 接待実績の指標を入れる
+    conn.execute(
+        "UPDATE judgements SET hotpepper_review_scenes='{\"kaishoku\":80}' WHERE shop_id='S1'")
+    conn.execute(
+        "UPDATE judgements SET hotpepper_review_scenes='{\"kaishoku\":40}' WHERE shop_id='S2'")
+    _seed_visit(conn, shop_id="S1", rating=5)
+    _seed_visit(conn, shop_id="S2", rating=5)
+    conn.commit()
+    p = recommend.build_profile(conn, min_rating=4)
+    assert p["review_scene_avg"]["kaishoku"] == 60  # (80+40)/2
+
+
 def test_recommend_excludes_visited_and_returns_top():
     db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
     conn = dbmod.init_db(db)

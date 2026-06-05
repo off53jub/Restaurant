@@ -373,6 +373,53 @@ def cmd_list(conn, args):
             print(f"   URL: {d['url']}")
 
 
+def cmd_companions(conn, args):
+    """同席者ごとの訪問サマリ。--name 指定でその人と行った店リスト。"""
+    if args.name:
+        rows = list(conn.execute(
+            "SELECT v.*, s.name AS shop_name, s.address, s.pc_url "
+            "FROM visits v LEFT JOIN shops s ON s.id=v.shop_id "
+            "WHERE v.companions LIKE ? ORDER BY v.visited_at DESC",
+            (f"%{args.name}%",),
+        ))
+        if not rows:
+            print(f"「{args.name}」を含む同席者の訪問記録なし")
+            return
+        if args.format == "json":
+            print(json.dumps([visit_to_dict(r) for r in rows],
+                             ensure_ascii=False, indent=2))
+            return
+        print(f"# {args.name} と行った店: {len(rows)}件\n" + "=" * 60)
+        for r in rows:
+            d = visit_to_dict(r)
+            star = ("★" * (d["rating"] or 0)).ljust(5, "☆") if d["rating"] else "—"
+            cost = f"{d['cost']:,}円" if d["cost"] else "—"
+            print(f"  {d['visited_at']} {star} {d['name']} ({d['scene'] or '-'}, {cost})")
+            if d["notes"]:
+                print(f"    メモ: {d['notes'][:80]}")
+        # 集計: ★平均、よく行くジャンル
+        rates = [d["rating"] for d in (visit_to_dict(r) for r in rows) if d["rating"]]
+        if rates:
+            print(f"\n  ★平均: {sum(rates)/len(rates):.1f} ({len(rates)}件評価)")
+        return
+
+    # 全同席者の登場頻度ランキング
+    from collections import Counter
+    cnt = Counter()
+    for (c,) in conn.execute("SELECT companions FROM visits WHERE companions IS NOT NULL"):
+        # 区切り想定: 「上司A、取引先2名」のような自由記述
+        for part in (c or "").replace("、", ",").replace("/", ",").split(","):
+            tag = part.strip()[:40]
+            if tag:
+                cnt[tag] += 1
+    if not cnt:
+        print("同席者データなし")
+        return
+    print("# 同席者頻出 TOP20\n" + "=" * 50)
+    for name, n in cnt.most_common(20):
+        print(f"  {n:>3}回: {name}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="訪問記録CLI")
     ap.add_argument("--db", default="db/shops.db")
@@ -421,10 +468,15 @@ def main():
     st = sub.add_parser("stats", help="訪問記録の集計ダッシュボード")
     st.add_argument("--format", choices=["text", "json"], default="text")
 
+    cp = sub.add_parser("companions", help="同席者プロファイル（接待相手の追跡）")
+    cp.add_argument("--name", help="特定の同席者名で絞り込み（部分一致）")
+    cp.add_argument("--format", choices=["text", "json"], default="text")
+
     args = ap.parse_args()
     conn = dbmod.init_db(args.db)  # スキーマ未作成でも自動作成
     {"add": cmd_add, "edit": cmd_edit, "rm": cmd_rm,
-     "list": cmd_list, "stats": cmd_stats}[args.cmd](conn, args)
+     "list": cmd_list, "stats": cmd_stats,
+     "companions": cmd_companions}[args.cmd](conn, args)
 
 
 if __name__ == "__main__":

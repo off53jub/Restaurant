@@ -1,4 +1,4 @@
-.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich social-enrich reviews wiki-enrich hp-reviews geo-enrich youtube-enrich foods osm-gap pull-db push-db push-db-seed
+.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich social-enrich reviews wiki-enrich hp-reviews geo-enrich youtube-enrich foods osm-gap pairs companions pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -45,6 +45,14 @@ report:
 # 訪問記録の一覧
 visits:
 	$(PY) visit.py --db $(DB) list $(ARGS)
+
+# 同席者プロファイル 例: make companions ARGS="--name 上司A"
+companions:
+	$(PY) visit.py --db $(DB) companions $(ARGS)
+
+# 1次会×2次会の鉄板コンビ 例: make pairs PRESET=kaishoku OUT=output/p.html
+pairs:
+	$(PY) pairs.py --db $(DB) --preset $(PRESET) --out $(OUT)
 
 # 訪問ダッシュボード（集計）
 stats:
