@@ -221,6 +221,11 @@ def migrate(conn):
             ("foursquare_fetched_at", "TEXT"),
             ("bluesky_mention_count", "INTEGER"),      # G7
             ("bluesky_fetched_at", "TEXT"),
+            ("opening_hours_json", "TEXT"),            # H2: 営業時間構造化
+            ("wayback_first_year", "INTEGER"),         # H1: 営業歴
+            ("wayback_last_year", "INTEGER"),
+            ("wayback_snapshot_count", "INTEGER"),
+            ("wayback_fetched_at", "TEXT"),
         ]:
             if col not in jcols:
                 conn.execute(f"ALTER TABLE judgements ADD COLUMN {col} {decl}")

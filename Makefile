@@ -1,4 +1,4 @@
-.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich social-enrich reviews wiki-enrich hp-reviews geo-enrich youtube-enrich foods osm-gap pairs companions pull-db push-db push-db-seed
+.PHONY: install test ingest ingest-gnavi ingest-osm enrich enrich-retry refresh query list q closures report visits stats compare recommend google-enrich social-enrich reviews wiki-enrich hp-reviews geo-enrich youtube-enrich foods osm-gap pairs companions amenities hp-photos elevation corp-enrich jsonld-enrich foursquare-enrich bluesky-enrich tokyo-data opening wayback pull-db push-db push-db-seed
 
 PY := .venv/bin/python
 DB := db/shops.db
@@ -129,6 +129,14 @@ bluesky-enrich:
 # G6: 東京都オープンデータCSV取込（汎用）
 tokyo-data:
 	$(PY) ingest_tokyo_opendata.py --db $(DB) --csv $(CSV) --dataset-name $(NAME)
+
+# H2: 営業時間の構造化（無料・既存raw_jsonから）
+opening:
+	$(PY) enrich_opening.py --db $(DB) $(ARGS)
+
+# H1: Wayback Machine で店ページの履歴（無料・キー不要）
+wayback:
+	$(PY) enrich_wayback.py --db $(DB) $(ARGS)
 
 # OSM固有(HotPepper未掲載)店のHTML発掘 例: make osm-gap AREA=港区 OUT=out/gap.html
 osm-gap:
