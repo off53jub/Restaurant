@@ -45,6 +45,13 @@ def select_targets(conn, args):
         where.append("EXISTS (SELECT 1 FROM judgements jj WHERE jj.shop_id=s.id "
                      "AND jj.hotpepper_review_count >= ?)")
         params.append(args.popular_threshold)
+    elif args.area and args.popular_threshold:
+        ors = " OR ".join("s.address LIKE ?" for _ in args.area)
+        where.append(f"({ors})")
+        params.extend(f"%{a}%" for a in args.area)
+        where.append("EXISTS (SELECT 1 FROM judgements jj WHERE jj.shop_id=s.id "
+                     "AND jj.hotpepper_review_count >= ?)")
+        params.append(args.popular_threshold)
     elif args.area:
         ors = " OR ".join("s.address LIKE ?" for _ in args.area)
         where.append(f"({ors})")
