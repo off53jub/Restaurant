@@ -186,6 +186,14 @@ def build_where(preset, area_kw=None, fts=None, price_min=None, price_max=None,
                 where.append(
                     "json_extract(j.amenities_json, '$.\"" + amenity_key + "\"') IN (1, 'yes', 'true', true)"
                 )
+        # SNS総合話題度（Bluesky + YouTube の合算）でフィルタ
+        sns_min = kwargs_extras.get("sns_min")
+        if sns_min is not None:
+            where.append(
+                "(COALESCE(j.bluesky_mention_count, 0) "
+                "+ COALESCE(j.youtube_video_count, 0)) >= ?"
+            )
+            args.append(sns_min)
     # 取得失敗除外
     where.append("(j.fetch_error IS NULL OR j.fetch_error = '')")
     return where, args, has_price_filter, (pmin, pmax), fts
@@ -195,7 +203,7 @@ def query(conn, preset_name=None, scene=None, sort=None, visited=None,
           google_min=None, google_reviews_min=None,
           not_visited_since_days=None, not_with_companion=None,
           wheelchair=False, credit_cards=False, takeaway=False,
-          outdoor_seating=False, **kwargs):
+          outdoor_seating=False, sns_min=None, **kwargs):
     preset = PRESETS.get(preset_name) if preset_name else None
     where, args, has_price, price_band, fts = build_where(
         preset,
@@ -206,7 +214,8 @@ def query(conn, preset_name=None, scene=None, sort=None, visited=None,
                        "wheelchair": wheelchair,
                        "credit_cards": credit_cards,
                        "takeaway": takeaway,
-                       "outdoor_seating": outdoor_seating},
+                       "outdoor_seating": outdoor_seating,
+                       "sns_min": sns_min},
         **kwargs,
     )
     scene = scene or (preset.get("scene") if preset else None)
@@ -378,6 +387,8 @@ def main():
                     help="テイクアウトあり")
     ap.add_argument("--outdoor-seating", action="store_true",
                     help="テラス席あり")
+    ap.add_argument("--sns-min", type=int, metavar="N",
+                    help="SNS総合話題度(Bluesky + YouTube)がN以上の店のみ")
     ap.add_argument("--with-nijikai", action="store_true",
                     help="各候補の徒歩圏で2次会候補を表示")
     ap.add_argument("--nijikai-distance", type=int, default=600,
@@ -437,6 +448,7 @@ def main():
         credit_cards=args.credit_cards,
         takeaway=args.takeaway,
         outdoor_seating=args.outdoor_seating,
+        sns_min=args.sns_min,
         area_kw=args.area,
         fts=args.fts,
         price_min=args.price_min,

@@ -15,7 +15,7 @@ import requests
 
 import db as dbmod
 
-ENDPOINT = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts"
+ENDPOINT = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
 UA = "restaurant-filter/0.1"
 
 
@@ -40,6 +40,11 @@ def select_targets(conn, args):
         params.extend(args.ids)
     elif args.visited_only:
         where.append("EXISTS (SELECT 1 FROM visits v WHERE v.shop_id=s.id)")
+    elif args.popular_only:
+        # HotPepper口コミ件数の多い人気店だけ
+        where.append("EXISTS (SELECT 1 FROM judgements jj WHERE jj.shop_id=s.id "
+                     "AND jj.hotpepper_review_count >= ?)")
+        params.append(args.popular_threshold)
     elif args.area:
         ors = " OR ".join("s.address LIKE ?" for _ in args.area)
         where.append(f"({ors})")
@@ -59,6 +64,10 @@ def main():
     src.add_argument("--ids", nargs="+")
     src.add_argument("--visited-only", action="store_true")
     src.add_argument("--area", action="append")
+    src.add_argument("--popular-only", action="store_true",
+                     help="HotPepper口コミN件以上の人気店だけ")
+    ap.add_argument("--popular-threshold", type=int, default=100,
+                    help="--popular-only の閾値（既定100）")
     ap.add_argument("--max-age-days", type=int, default=30)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--delay", type=float, default=0.5)
