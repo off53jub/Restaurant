@@ -206,7 +206,21 @@ def migrate(conn):
             ("youtube_video_count", "INTEGER"),
             ("youtube_top_views", "INTEGER"),
             ("youtube_fetched_at", "TEXT"),
-            ("ward", "TEXT"),  # 逆ジオコーディング結果
+            ("ward", "TEXT"),                          # 逆ジオコーディング結果
+            ("amenities_json", "TEXT"),                # G4: 設備情報
+            ("elevation_m", "REAL"),                   # G8: 標高
+            ("photo_food_count", "INTEGER"),           # G3: 料理写真数
+            ("photo_interior_count", "INTEGER"),       # G3: 内装写真数
+            ("hp_photo_fetched_at", "TEXT"),
+            ("corp_number", "TEXT"),                   # G2: 法人番号
+            ("corp_kind", "TEXT"),                     # 個人/株式会社/etc
+            ("corp_fetched_at", "TEXT"),
+            ("jsonld_json", "TEXT"),                   # G5: schema.org
+            ("foursquare_id", "TEXT"),                 # G1
+            ("foursquare_popularity", "REAL"),
+            ("foursquare_fetched_at", "TEXT"),
+            ("bluesky_mention_count", "INTEGER"),      # G7
+            ("bluesky_fetched_at", "TEXT"),
         ]:
             if col not in jcols:
                 conn.execute(f"ALTER TABLE judgements ADD COLUMN {col} {decl}")

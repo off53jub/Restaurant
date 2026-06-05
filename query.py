@@ -175,6 +175,17 @@ def build_where(preset, area_kw=None, fts=None, price_min=None, price_max=None,
                 "AND v.companions LIKE ?)"
             )
             args.append(f"%{ncw}%")
+        # G4: 設備フィルタ（amenities_json内のキーで判定）
+        for key, amenity_key in [
+            ("wheelchair", "wheelchair"),
+            ("credit_cards", "payment:credit_cards"),
+            ("takeaway", "takeaway"),
+            ("outdoor_seating", "outdoor_seating"),
+        ]:
+            if kwargs_extras.get(key):
+                where.append(
+                    "json_extract(j.amenities_json, '$.\"" + amenity_key + "\"') IN (1, 'yes', 'true', true)"
+                )
     # 取得失敗除外
     where.append("(j.fetch_error IS NULL OR j.fetch_error = '')")
     return where, args, has_price_filter, (pmin, pmax), fts
@@ -182,14 +193,20 @@ def build_where(preset, area_kw=None, fts=None, price_min=None, price_max=None,
 
 def query(conn, preset_name=None, scene=None, sort=None, visited=None,
           google_min=None, google_reviews_min=None,
-          not_visited_since_days=None, not_with_companion=None, **kwargs):
+          not_visited_since_days=None, not_with_companion=None,
+          wheelchair=False, credit_cards=False, takeaway=False,
+          outdoor_seating=False, **kwargs):
     preset = PRESETS.get(preset_name) if preset_name else None
     where, args, has_price, price_band, fts = build_where(
         preset,
         kwargs_extras={"visited": visited, "google_min": google_min,
                        "google_reviews_min": google_reviews_min,
                        "not_visited_since_days": not_visited_since_days,
-                       "not_with_companion": not_with_companion},
+                       "not_with_companion": not_with_companion,
+                       "wheelchair": wheelchair,
+                       "credit_cards": credit_cards,
+                       "takeaway": takeaway,
+                       "outdoor_seating": outdoor_seating},
         **kwargs,
     )
     scene = scene or (preset.get("scene") if preset else None)
@@ -352,6 +369,15 @@ def main():
                     help="この日数以内に行った店は除外（接待で同店連れて行かない用）")
     ap.add_argument("--not-with-companion", metavar="NAME",
                     help="この人と既に行った店は除外（companion文字列部分一致）")
+    # G4 amenities
+    ap.add_argument("--wheelchair", action="store_true",
+                    help="バリアフリー対応店のみ")
+    ap.add_argument("--credit-cards", action="store_true",
+                    help="クレカ可の店のみ")
+    ap.add_argument("--takeaway", action="store_true",
+                    help="テイクアウトあり")
+    ap.add_argument("--outdoor-seating", action="store_true",
+                    help="テラス席あり")
     ap.add_argument("--with-nijikai", action="store_true",
                     help="各候補の徒歩圏で2次会候補を表示")
     ap.add_argument("--nijikai-distance", type=int, default=600,
@@ -407,6 +433,10 @@ def main():
         google_reviews_min=args.google_reviews_min,
         not_visited_since_days=args.not_visited_since,
         not_with_companion=args.not_with_companion,
+        wheelchair=args.wheelchair,
+        credit_cards=args.credit_cards,
+        takeaway=args.takeaway,
+        outdoor_seating=args.outdoor_seating,
         area_kw=args.area,
         fts=args.fts,
         price_min=args.price_min,

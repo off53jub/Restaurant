@@ -98,6 +98,38 @@ youtube-enrich:
 foods:
 	$(PY) ingest_foods.py --db $(DB) --csv $(CSV)
 
+# G4: OSM/HPの設備タグを judgements.amenities_json に展開（無料・即時）
+amenities:
+	$(PY) enrich_amenities.py --db $(DB) $(ARGS)
+
+# G3: HotPepper写真ページから写真数取得
+hp-photos:
+	$(PY) enrich_photos.py --db $(DB) $(ARGS)
+
+# G8: 国土地理院 標高API（無料）
+elevation:
+	$(PY) enrich_elevation.py --db $(DB) $(ARGS)
+
+# G2: 国税庁 法人番号API（要 HOUJIN_API_KEY）
+corp-enrich:
+	$(PY) enrich_corporation.py --db $(DB) $(ARGS)
+
+# G5: 公式サイトから schema.org JSON-LD 抽出
+jsonld-enrich:
+	$(PY) enrich_jsonld.py --db $(DB) $(ARGS)
+
+# G1: Foursquare（要 FSQ_API_KEY、無料枠1000/月）
+foursquare-enrich:
+	$(PY) enrich_foursquare.py --db $(DB) $(ARGS)
+
+# G7: Bluesky検索でメンション数取得（無料・キー不要）
+bluesky-enrich:
+	$(PY) enrich_bluesky.py --db $(DB) $(ARGS)
+
+# G6: 東京都オープンデータCSV取込（汎用）
+tokyo-data:
+	$(PY) ingest_tokyo_opendata.py --db $(DB) --csv $(CSV) --dataset-name $(NAME)
+
 # OSM固有(HotPepper未掲載)店のHTML発掘 例: make osm-gap AREA=港区 OUT=out/gap.html
 osm-gap:
 	$(PY) osm_gap.py --db $(DB) --area $(AREA) --out $(OUT)
