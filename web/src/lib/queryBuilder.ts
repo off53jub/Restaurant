@@ -135,7 +135,7 @@ export function searchShops(db: Database, q: SearchQuery): SearchResult {
            j.drink_course_min_yen, j.drink_course_prices_json, j.course_prices_any_json,
            j.fully_private_room, j.mid_room_ok, j.mid_room_evidence,
            j.smoking_at_seat, j.atmosphere_calm, j.atmosphere_special,
-           j.kaishoku_score, j.instagram_score, j.kaishoku_hits_json, j.instagram_hits_json,
+           j.kaishoku_score, j.instagram_score, j.instagram_hits_json,
            j.shop_description, j.hotpepper_review_count, j.hotpepper_review_scenes,
            j.opening_hours_json, j.amenities_json,
            g.rating AS google_rating, g.user_ratings_total AS google_reviews,

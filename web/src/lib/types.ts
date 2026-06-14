@@ -29,7 +29,6 @@ export type ShopRow = {
   atmosphere_special: number | null
   kaishoku_score: number
   instagram_score: number
-  kaishoku_hits_json: string | null
   instagram_hits_json: string | null
   shop_description: string | null
   hotpepper_review_count: number | null

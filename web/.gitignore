@@ -4,3 +4,5 @@ dev-dist
 .DS_Store
 .env.local
 *.local
+public/shops-web.db.gz
+tsconfig.tsbuildinfo
