@@ -92,6 +92,42 @@ function buildWhere(q: SearchQuery): WhereBuild {
 
 export type ShopRowWithDistance = ShopRow & { distance_m?: number }
 
+export type Review = { shop_id: string; text: string }
+
+export function getShopById(db: Database, id: string): ShopRowWithDistance | null {
+  const sql = `
+    SELECT s.id, s.name, s.address, s.station_name, s.lat, s.lng,
+           s.genre_name, s.budget_name, s.access, s.pc_url, s.catch, s.source,
+           s.photo_url_l, s.photo_url_s,
+           j.drink_course_min_yen, j.drink_course_prices_json, j.course_prices_any_json,
+           j.fully_private_room, j.mid_room_ok, j.mid_room_evidence,
+           j.smoking_at_seat, j.atmosphere_calm, j.atmosphere_special,
+           j.kaishoku_score, j.instagram_score, j.instagram_hits_json,
+           j.shop_description, j.hotpepper_review_count, j.hotpepper_review_scenes,
+           j.opening_hours_json, j.amenities_json,
+           so.instagram_url AS social_instagram, so.tiktok_url AS social_tiktok,
+           so.og_description AS social_og_description, so.og_image AS social_og_image
+    FROM shops s
+    JOIN judgements j ON j.shop_id = s.id
+    LEFT JOIN social so ON so.shop_id = s.id
+    WHERE s.id = ?
+  `
+  const stmt = db.prepare(sql)
+  stmt.bind([id])
+  const row = stmt.step() ? (stmt.getAsObject() as unknown as ShopRowWithDistance) : null
+  stmt.free()
+  return row
+}
+
+export function getReviewsByShopId(db: Database, shopId: string, limit = 50): Review[] {
+  const stmt = db.prepare('SELECT shop_id, text FROM reviews WHERE shop_id = ? LIMIT ?')
+  stmt.bind([shopId, limit])
+  const out: Review[] = []
+  while (stmt.step()) out.push(stmt.getAsObject() as unknown as Review)
+  stmt.free()
+  return out
+}
+
 export type SearchResult = {
   rows: ShopRowWithDistance[]
   priceBand: [number, number] | null

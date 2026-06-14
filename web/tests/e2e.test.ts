@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import pako from 'pako'
 import initSqlJs from 'sql.js'
-import { searchShops } from '../src/lib/queryBuilder'
+import { getReviewsByShopId, getShopById, searchShops } from '../src/lib/queryBuilder'
 
 const DB_PATH = resolve(__dirname, '../public/shops-web.db.gz')
 
@@ -52,6 +52,37 @@ describe.skipIf(skip)('e2e: real DB + kaishoku preset', () => {
       expect(r.address).toMatch(/新宿|歌舞伎町|代々木|千駄ヶ谷|信濃町|四谷|四ツ谷|曙橋|市ヶ谷|中野坂上/)
       expect(r.atmosphere_calm ?? 0).toBeGreaterThanOrEqual(50)
     }
+
+    db.close()
+  }, 60000)
+
+  it('getShopById + getReviewsByShopId surface reviews for a known shop', async () => {
+    const gz = readFileSync(DB_PATH)
+    const dbBytes = pako.ungzip(gz)
+
+    const SQL = await initSqlJs()
+    const db = new SQL.Database(dbBytes)
+
+    // Pick a shop that has reviews
+    const stmt = db.prepare('SELECT shop_id FROM reviews GROUP BY shop_id HAVING COUNT(*) >= 3 LIMIT 1')
+    expect(stmt.step()).toBe(true)
+    const { shop_id } = stmt.getAsObject() as { shop_id: string }
+    stmt.free()
+
+    const shop = getShopById(db, shop_id)
+    expect(shop).not.toBeNull()
+    expect(shop!.id).toBe(shop_id)
+    expect(shop!.name).toBeTypeOf('string')
+
+    const reviews = getReviewsByShopId(db, shop_id, 50)
+    expect(reviews.length).toBeGreaterThanOrEqual(3)
+    for (const r of reviews) {
+      expect(r.shop_id).toBe(shop_id)
+      expect(r.text.length).toBeGreaterThan(0)
+    }
+
+    expect(getShopById(db, 'non-existent-id')).toBeNull()
+    expect(getReviewsByShopId(db, 'non-existent-id')).toEqual([])
 
     db.close()
   }, 60000)

@@ -104,9 +104,25 @@ def main():
     conn = sqlite3.connect(work)
     conn.execute("PRAGMA foreign_keys=OFF")
 
-    # 不要テーブルを削除
-    for tbl in ("reviews", "ingest_runs", "google", "wiki"):
+    # 不要テーブルを削除（reviews は trim して残す）
+    for tbl in ("ingest_runs", "google", "wiki"):
         conn.execute(f"DROP TABLE IF EXISTS {tbl}")
+
+    # reviews は (shop_id, text) のみ残す。元テーブルの UNIQUE 制約が
+    # source/author を参照しており DROP COLUMN が通らないので作り直す。
+    if conn.execute("SELECT name FROM sqlite_master WHERE name='reviews'").fetchone():
+        n_before = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+        conn.execute("CREATE TABLE reviews_new (shop_id TEXT NOT NULL, text TEXT NOT NULL)")
+        conn.execute(
+            "INSERT INTO reviews_new (shop_id, text) "
+            "SELECT shop_id, text FROM reviews "
+            "WHERE text IS NOT NULL AND text != ''"
+        )
+        conn.execute("DROP TABLE reviews")
+        conn.execute("ALTER TABLE reviews_new RENAME TO reviews")
+        conn.execute("CREATE INDEX reviews_shop_id ON reviews(shop_id)")
+        n_after = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+        print(f"   reviews trimmed: {n_before} -> {n_after} rows", file=sys.stderr)
 
     # FTS5 トリガを削除（配布DBは read-only。DROP COLUMN を通すためにも必要）
     for trig in ("shops_ai", "shops_ad", "shops_au"):
