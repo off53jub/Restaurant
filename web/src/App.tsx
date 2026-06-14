@@ -7,6 +7,7 @@ import { DB_SOURCE } from './lib/config'
 import { Home } from './routes/Home'
 import { Search } from './routes/Search'
 import { Settings } from './routes/Settings'
+import { Near } from './routes/Near'
 
 const DbContext = createContext<Database | null>(null)
 export function useDb(): Database | null {
@@ -91,6 +92,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/search" element={<Search />} />
+          <Route path="/near" element={<Near />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Router>

@@ -10,6 +10,16 @@ export function Home() {
       </header>
 
       <section>
+        <Link
+          to="/near"
+          className="block rounded-xl border border-amber-500/50 bg-gradient-to-br from-amber-500/20 to-amber-700/10 p-5 active:scale-[0.98] transition-transform"
+        >
+          <div className="text-lg font-bold text-amber-200">いまから行ける</div>
+          <div className="text-xs text-amber-100/70 mt-1">現在地周辺 / 営業中</div>
+        </Link>
+      </section>
+
+      <section>
         <h2 className="text-sm font-semibold text-neutral-400 mb-2">プリセット</h2>
         <div className="space-y-2">
           {Object.entries(PRESETS).map(([key, preset]) => (

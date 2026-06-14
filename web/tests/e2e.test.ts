@@ -53,4 +53,31 @@ describe.skipIf(skip)('e2e: real DB + kaishoku preset', () => {
 
     db.close()
   }, 60000)
+
+  it('runs a near-me query and returns rows within radius, with distance_m attached', async () => {
+    const gz = readFileSync(DB_PATH)
+    const dbBytes = pako.ungzip(gz)
+
+    const SQL = await initSqlJs()
+    const db = new SQL.Database(dbBytes)
+
+    const toranomonHills = { lat: 35.6678, lng: 139.7494 }
+    const result = searchShops(db, {
+      near: { ...toranomonHills, radiusM: 500 },
+      sort: 'distance',
+      limit: 10
+    })
+    expect(result.rows.length).toBeGreaterThan(0)
+    expect(result.origin).toEqual(toranomonHills)
+
+    let prev = -1
+    for (const r of result.rows) {
+      expect(r.distance_m).toBeTypeOf('number')
+      expect(r.distance_m!).toBeGreaterThanOrEqual(prev)
+      prev = r.distance_m!
+      expect(r.distance_m!).toBeLessThanOrEqual(500)
+    }
+
+    db.close()
+  }, 60000)
 })

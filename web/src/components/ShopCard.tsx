@@ -1,8 +1,11 @@
-import type { ShopRow, SceneName } from '../lib/types'
+import type { SceneName } from '../lib/types'
 import { compositeScore } from '../lib/score'
+import type { ShopRowWithDistance } from '../lib/queryBuilder'
+import { formatDistance, estimateWalkMinutes } from '../lib/geo'
+import { isOpenAt, parseOpeningHours } from '../lib/openHours'
 
 type Props = {
-  shop: ShopRow
+  shop: ShopRowWithDistance
   scene: SceneName | null
   priceBand: [number, number] | null
   rank: number
@@ -14,7 +17,7 @@ function bar(v: number | null): string {
   return '█'.repeat(filled) + '░'.repeat(10 - filled)
 }
 
-function smokingLabel(s: ShopRow['smoking_at_seat']): string {
+function smokingLabel(s: ShopRowWithDistance['smoking_at_seat']): string {
   switch (s) {
     case 'allowed': return '○ 喫煙可'
     case 'partial': return '△ 分煙'
@@ -32,13 +35,26 @@ export function ShopCard({ shop, scene, priceBand, rank }: Props) {
   const bandPrices = priceBand
     ? prices.filter(p => p >= priceBand[0] && p <= priceBand[1])
     : []
+  const oh = parseOpeningHours(shop.opening_hours_json)
+  const openStatus = oh ? isOpenAt(oh, new Date().getHours()) : { state: 'unknown' as const }
 
   return (
     <article className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 space-y-2">
       <header className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-xs text-neutral-500">#{rank}</div>
-          <h3 className="text-base font-semibold">{shop.name}</h3>
+        <div className="min-w-0">
+          <div className="text-xs text-neutral-500 flex items-center gap-2">
+            <span>#{rank}</span>
+            {shop.distance_m != null && (
+              <span className="text-sky-300">
+                {formatDistance(shop.distance_m)} (徒歩{estimateWalkMinutes(shop.distance_m)}分)
+              </span>
+            )}
+            {openStatus.state === 'open' && (
+              <span className="text-emerald-400">● 営業中{openStatus.until ? ` (〜${openStatus.until}時)` : ''}</span>
+            )}
+            {openStatus.state === 'closed' && <span className="text-neutral-500">○ 営業時間外</span>}
+          </div>
+          <h3 className="text-base font-semibold truncate">{shop.name}</h3>
           <div className="text-xs text-neutral-400">{shop.genre_name}</div>
         </div>
         {fit !== null && (

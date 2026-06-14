@@ -2,6 +2,7 @@ import type { Database, BindParams } from 'sql.js'
 import type { ShopRow, SearchQuery, SceneName } from './types'
 import { PRESETS } from './presets'
 import { compositeScore } from './score'
+import { haversineMeters } from './geo'
 
 type WhereBuild = {
   where: string[]
@@ -89,21 +90,13 @@ function buildWhere(q: SearchQuery): WhereBuild {
   }
 }
 
-function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const R = 6371000
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const dLat = toRad(bLat - aLat)
-  const dLng = toRad(bLng - aLng)
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(h))
-}
+export type ShopRowWithDistance = ShopRow & { distance_m?: number }
 
 export type SearchResult = {
-  rows: ShopRow[]
+  rows: ShopRowWithDistance[]
   priceBand: [number, number] | null
   scene: SceneName | null
+  origin: { lat: number; lng: number } | null
 }
 
 export function searchShops(db: Database, q: SearchQuery): SearchResult {
@@ -151,51 +144,57 @@ export function searchShops(db: Database, q: SearchQuery): SearchResult {
 
   const stmt = db.prepare(sql)
   stmt.bind(args as BindParams)
-  const rows: ShopRow[] = []
+  const rows: ShopRowWithDistance[] = []
   while (stmt.step()) {
-    rows.push(stmt.getAsObject() as unknown as ShopRow)
+    rows.push(stmt.getAsObject() as unknown as ShopRowWithDistance)
   }
   stmt.free()
 
-  // sort in JS
+  let workingRows = rows
+  if (q.near) {
+    const origin = { lat: q.near.lat, lng: q.near.lng }
+    for (const r of workingRows) {
+      if (r.lat != null && r.lng != null) {
+        r.distance_m = haversineMeters(origin, { lat: r.lat, lng: r.lng })
+      }
+    }
+    workingRows = workingRows.filter(r => (r.distance_m ?? Infinity) <= q.near!.radiusM)
+  }
+
   if (sortMode === 'composite' && scene) {
     const band = built.priceBand ?? undefined
-    rows.sort((a, b) => {
+    workingRows.sort((a, b) => {
       const pa = JSON.parse(a.drink_course_prices_json || '[]') as number[]
       const pb = JSON.parse(b.drink_course_prices_json || '[]') as number[]
       return compositeScore(b, pb, scene, band) - compositeScore(a, pa, scene, band)
     })
   } else if (sortMode === 'distance' && q.near) {
-    const { lat, lng } = q.near
-    rows.sort((a, b) => {
-      const da = a.lat != null && a.lng != null ? haversineM(lat, lng, a.lat, a.lng) : Infinity
-      const db = b.lat != null && b.lng != null ? haversineM(lat, lng, b.lat, b.lng) : Infinity
-      return da - db
-    })
+    workingRows.sort((a, b) => (a.distance_m ?? Infinity) - (b.distance_m ?? Infinity))
   } else if (sortMode === 'atmosphere') {
-    rows.sort((a, b) =>
+    workingRows.sort((a, b) =>
       (b.atmosphere_calm ?? 0) - (a.atmosphere_calm ?? 0) ||
       (b.atmosphere_special ?? 0) - (a.atmosphere_special ?? 0) ||
       b.kaishoku_score - a.kaishoku_score
     )
   } else if (sortMode === 'instagram') {
-    rows.sort((a, b) =>
+    workingRows.sort((a, b) =>
       b.instagram_score - a.instagram_score ||
       (b.atmosphere_special ?? 0) - (a.atmosphere_special ?? 0)
     )
   } else if (sortMode === 'score') {
-    rows.sort((a, b) =>
+    workingRows.sort((a, b) =>
       b.kaishoku_score - a.kaishoku_score ||
       (a.drink_course_min_yen ?? Infinity) - (b.drink_course_min_yen ?? Infinity)
     )
   } else if (sortMode === 'price') {
-    rows.sort((a, b) => (a.drink_course_min_yen ?? Infinity) - (b.drink_course_min_yen ?? Infinity))
+    workingRows.sort((a, b) => (a.drink_course_min_yen ?? Infinity) - (b.drink_course_min_yen ?? Infinity))
   }
 
-  const limit = q.limit && q.limit > 0 ? q.limit : rows.length
-  return { rows: rows.slice(0, limit), priceBand: built.priceBand, scene }
-}
-
-export function distanceM(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  return haversineM(aLat, aLng, bLat, bLng)
+  const limit = q.limit && q.limit > 0 ? q.limit : workingRows.length
+  return {
+    rows: workingRows.slice(0, limit),
+    priceBand: built.priceBand,
+    scene,
+    origin: q.near ? { lat: q.near.lat, lng: q.near.lng } : null
+  }
 }

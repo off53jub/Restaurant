@@ -25,15 +25,25 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,wasm,png,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
+        globIgnores: [
+          '**/sql-asm*',
+          '**/sql-wasm-debug*',
+          '**/sql-wasm-browser-debug*',
+          '**/worker.sql-asm*',
+          '**/worker.sql-wasm-debug*'
+        ],
         runtimeCaching: [
           {
-            urlPattern: /sql-wasm\.wasm$/,
+            urlPattern: ({ url }) => url.pathname.endsWith('/sql-wasm.wasm') || url.pathname.includes('sql-wasm-') && url.pathname.endsWith('.wasm'),
             handler: 'CacheFirst',
-            options: { cacheName: 'sqljs-wasm', expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 30 } }
+            options: {
+              cacheName: 'sqljs-wasm',
+              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 30 }
+            }
           }
         ],
-        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024
       }
     })
   ],
