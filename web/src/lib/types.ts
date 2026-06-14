@@ -17,6 +17,8 @@ export type ShopRow = {
   pc_url: string | null
   catch: string | null
   source: string
+  photo_url_l: string | null
+  photo_url_s: string | null
   // judgement (left/inner joined)
   drink_course_min_yen: number | null
   drink_course_prices_json: string | null
@@ -41,6 +43,7 @@ export type ShopRow = {
   social_instagram?: string | null
   social_tiktok?: string | null
   social_og_description?: string | null
+  social_og_image?: string | null
 }
 
 export type Preset = {

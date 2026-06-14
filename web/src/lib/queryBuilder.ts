@@ -125,19 +125,18 @@ export function searchShops(db: Database, q: SearchQuery): SearchResult {
   const sql = `
     SELECT s.id, s.name, s.address, s.station_name, s.lat, s.lng,
            s.genre_name, s.budget_name, s.access, s.pc_url, s.catch, s.source,
+           s.photo_url_l, s.photo_url_s,
            j.drink_course_min_yen, j.drink_course_prices_json, j.course_prices_any_json,
            j.fully_private_room, j.mid_room_ok, j.mid_room_evidence,
            j.smoking_at_seat, j.atmosphere_calm, j.atmosphere_special,
            j.kaishoku_score, j.instagram_score, j.instagram_hits_json,
            j.shop_description, j.hotpepper_review_count, j.hotpepper_review_scenes,
            j.opening_hours_json, j.amenities_json,
-           g.rating AS google_rating, g.user_ratings_total AS google_reviews,
            so.instagram_url AS social_instagram, so.tiktok_url AS social_tiktok,
-           so.og_description AS social_og_description
+           so.og_description AS social_og_description, so.og_image AS social_og_image
     FROM shops s
     ${ftsJoin}
     JOIN judgements j ON j.shop_id = s.id
-    LEFT JOIN google g ON g.shop_id = s.id
     LEFT JOIN social so ON so.shop_id = s.id
     WHERE ${whereSql} ${priceJoin}
   `

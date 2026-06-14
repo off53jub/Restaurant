@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""配信用に shops.db を縮小して shops-web.db.gz を作る (Phase A 暫定版)。
+"""配信用に shops.db を縮小して shops-web.db.gz を作る (Phase D)。
 
-Phase A: reviews テーブル/不要列を落として VACUUM するだけ。
-  - reviews テーブル丸ごと削除（口コミは詳細画面の Phase E で別途 lazy fetch）
-  - judgements の重い JSON 列のうち UI 不要なものを削除
-  - ingest_runs (運用ログ) を削除
-Phase D で raw_json を分解して photo URL 等を新規列に取り出す予定（未実装）。
+Phase A の reviews/operational ドロップに加え、Phase D では:
+  - shops.raw_json を分解して photo_url_l / photo_url_s を新規列に取り出す
+  - shops の未使用列（生テキスト・運用日時）と raw_json をドロップ
+  - social の未使用列（og_title, facebook_url ほか）をドロップ
+  - 空 / 不要テーブルを削除
+  - FTS5 トリガを削除（配布DBは read-only）
 """
 import argparse
 import gzip
@@ -15,13 +16,11 @@ import sys
 from pathlib import Path
 
 
-# UI に不要な列（Phase A）。`judgements` テーブルから DROP COLUMN する。
-DROP_JUDGEMENT_COLS = [
+# UI で参照していない judgements 列。
+JUDGEMENT_DROP = [
     "kaishoku_hits_json",
-    "instagram_hits_json",  # コメント: ShopCard で使うので Phase A は残す
     "private_evidence",
     "smoking_evidence",
-    "mid_room_evidence",  # コメント: 5-8名個室の根拠表示で使うので残す
     "jsonld_json",
     "elevation_m",
     "photo_food_count",
@@ -33,41 +32,55 @@ DROP_JUDGEMENT_COLS = [
     "foursquare_id",
     "foursquare_popularity",
     "foursquare_fetched_at",
+    "wayback_first_year",
+    "wayback_last_year",
+    "wayback_snapshot_count",
+    "wayback_fetched_at",
+    "youtube_top_views",
+    "youtube_fetched_at",
+    "hp_review_fetched_at",
     "bluesky_mention_count",
     "bluesky_fetched_at",
-    "wayback_first_year",
-    "wayback_last_year",
-    "wayback_snapshot_count",
-    "wayback_fetched_at",
-    "youtube_video_count",
-    "youtube_top_views",
-    "youtube_fetched_at",
-    "hp_review_fetched_at",
+    "enriched_at",
+    "ward",
 ]
-# Phase A で UI から本当に参照しないもののみ残し、根拠系は ShopCard 用に残す
-ACTUALLY_DROP = [
-    "kaishoku_hits_json",     # ShopCard で kaishoku_hits は使っていない
-    "private_evidence",
-    "smoking_evidence",
-    "jsonld_json",
-    "elevation_m",
-    "photo_food_count",
-    "photo_interior_count",
-    "hp_photo_fetched_at",
-    "corp_number",
-    "corp_kind",
-    "corp_fetched_at",
-    "foursquare_id",
-    "foursquare_popularity",
-    "foursquare_fetched_at",
-    "wayback_first_year",
-    "wayback_last_year",
-    "wayback_snapshot_count",
-    "wayback_fetched_at",
-    "youtube_top_views",
-    "youtube_fetched_at",
-    "hp_review_fetched_at",
+
+# shops から落とす列。raw_json は backfill 後に削除する。
+# name_kana は FTS5 の検索ターゲットなので Phase E 用に残す。
+SHOPS_DROP = [
+    "private_room",      # 生テキスト。judgements.fully_private_room を使う
+    "free_drink",
+    "non_smoking",
+    "course",            # 生テキスト。drink_course_prices_json を使う
+    "capacity",
+    "party_capacity",
+    "first_seen_at",
+    "last_seen_at",
+    "fetched_at",
+    "raw_json",          # 最後に backfill 後ドロップ
 ]
+
+# social から落とす列。og_image は ShopCard 写真フォールバックとして残す。
+SOCIAL_DROP = [
+    "og_title",
+    "facebook_url",
+    "twitter_url",
+    "line_url",
+    "youtube_url",
+    "final_url",
+    "fetched_at",
+    "fetch_error",
+]
+
+
+def drop_columns(conn: sqlite3.Connection, table: str, cols: list[str]):
+    existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for col in cols:
+        if col in existing:
+            try:
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+            except sqlite3.OperationalError as e:
+                print(f"   skip drop {table}.{col}: {e}", file=sys.stderr)
 
 
 def main():
@@ -81,43 +94,60 @@ def main():
         print(f"ERROR: input DB not found: {src}", file=sys.stderr)
         sys.exit(1)
 
-    # ワーキングコピーで作業（VACUUM 用）
     work = Path(args.out).with_suffix("")  # .gz を除いた .db パス
     work.parent.mkdir(parents=True, exist_ok=True)
     if work.exists():
         work.unlink()
     shutil.copy2(src, work)
-    print(f"[1/4] copied {src} -> {work} ({work.stat().st_size/1024/1024:.1f} MB)", file=sys.stderr)
+    print(f"[1/6] copied {src} -> {work} ({work.stat().st_size/1024/1024:.1f} MB)", file=sys.stderr)
 
     conn = sqlite3.connect(work)
     conn.execute("PRAGMA foreign_keys=OFF")
 
-    # reviews / ingest_runs を削除
-    for tbl in ("reviews", "ingest_runs"):
+    # 不要テーブルを削除
+    for tbl in ("reviews", "ingest_runs", "google", "wiki"):
         conn.execute(f"DROP TABLE IF EXISTS {tbl}")
 
-    # judgements の不要列を SQLite 3.35+ の DROP COLUMN で削除
-    jcols = {r[1] for r in conn.execute("PRAGMA table_info(judgements)").fetchall()}
-    for col in ACTUALLY_DROP:
-        if col in jcols:
-            try:
-                conn.execute(f"ALTER TABLE judgements DROP COLUMN {col}")
-            except sqlite3.OperationalError as e:
-                print(f"   skip drop {col}: {e}", file=sys.stderr)
+    # FTS5 トリガを削除（配布DBは read-only。DROP COLUMN を通すためにも必要）
+    for trig in ("shops_ai", "shops_ad", "shops_au"):
+        conn.execute(f"DROP TRIGGER IF EXISTS {trig}")
 
+    # 落とす列を参照しているインデックスを先に削除
+    for idx in ("shops_last_seen", "j_enriched"):
+        conn.execute(f"DROP INDEX IF EXISTS {idx}")
+
+    print("[2/6] dropped unused tables, triggers, indexes", file=sys.stderr)
+
+    # raw_json -> photo_url_l / photo_url_s を抽出
+    shops_cols = {r[1] for r in conn.execute("PRAGMA table_info(shops)").fetchall()}
+    if "photo_url_l" not in shops_cols:
+        conn.execute("ALTER TABLE shops ADD COLUMN photo_url_l TEXT")
+    if "photo_url_s" not in shops_cols:
+        conn.execute("ALTER TABLE shops ADD COLUMN photo_url_s TEXT")
+    n = conn.execute(
+        "UPDATE shops SET "
+        "photo_url_l = json_extract(raw_json, '$.photo.pc.l'), "
+        "photo_url_s = json_extract(raw_json, '$.photo.pc.s') "
+        "WHERE raw_json IS NOT NULL"
+    ).rowcount
+    print(f"[3/6] backfilled photo URLs for {n} shops", file=sys.stderr)
+
+    # 列ドロップ
+    drop_columns(conn, "shops", SHOPS_DROP)
+    drop_columns(conn, "judgements", JUDGEMENT_DROP)
+    drop_columns(conn, "social", SOCIAL_DROP)
     conn.commit()
-    print("[2/4] dropped unused tables and columns", file=sys.stderr)
+    print("[4/6] dropped unused columns", file=sys.stderr)
 
     conn.execute("VACUUM")
     conn.close()
-    print(f"[3/4] vacuumed -> {work.stat().st_size/1024/1024:.1f} MB", file=sys.stderr)
+    print(f"[5/6] vacuumed -> {work.stat().st_size/1024/1024:.1f} MB", file=sys.stderr)
 
-    # gzip
     gz_path = Path(args.out)
     with open(work, "rb") as fin, gzip.open(gz_path, "wb", compresslevel=9) as fout:
         shutil.copyfileobj(fin, fout)
     work.unlink()
-    print(f"[4/4] gzipped -> {gz_path} ({gz_path.stat().st_size/1024/1024:.1f} MB)", file=sys.stderr)
+    print(f"[6/6] gzipped -> {gz_path} ({gz_path.stat().st_size/1024/1024:.1f} MB)", file=sys.stderr)
 
 
 if __name__ == "__main__":

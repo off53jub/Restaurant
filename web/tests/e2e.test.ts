@@ -32,6 +32,8 @@ describe.skipIf(skip)('e2e: real DB + kaishoku preset', () => {
       expect(r.mid_room_ok).toBe(1)
       expect(r.smoking_at_seat).toBe('allowed')
       expect(r.address).toMatch(/虎ノ門|新橋|赤坂|銀座|六本木|汐留|霞が関|内幸町|浜松町|西新橋|麻布|新富|築地|愛宕/)
+      // Phase D: photo URL columns populated
+      expect(r.photo_url_l).toMatch(/^https:\/\/imgfp\.hotp\.jp\//)
     }
 
     db.close()
