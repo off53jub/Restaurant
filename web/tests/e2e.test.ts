@@ -9,6 +9,7 @@ import { resolve } from 'node:path'
 import pako from 'pako'
 import initSqlJs from 'sql.js'
 import { getReviewsByShopId, getShopById, searchShops } from '../src/lib/queryBuilder'
+import { findStation } from '../src/lib/stations'
 
 const DB_PATH = resolve(__dirname, '../public/shops-web.db.gz')
 
@@ -83,6 +84,43 @@ describe.skipIf(skip)('e2e: real DB + kaishoku preset', () => {
 
     expect(getShopById(db, 'non-existent-id')).toBeNull()
     expect(getReviewsByShopId(db, 'non-existent-id')).toEqual([])
+
+    db.close()
+  }, 60000)
+
+  it('station date search (Ebisu, any-course budget) returns date-scene rows within radius', async () => {
+    const gz = readFileSync(DB_PATH)
+    const dbBytes = pako.ungzip(gz)
+
+    const SQL = await initSqlJs()
+    const db = new SQL.Database(dbBytes)
+
+    const ebisu = findStation('恵比寿')
+    expect(ebisu).toBeDefined()
+
+    const result = searchShops(db, {
+      scene: 'date',
+      priceField: 'any',
+      priceMin: 5000,
+      priceMax: 8000,
+      near: { lat: ebisu!.lat, lng: ebisu!.lng, radiusM: 1200 },
+      sort: 'composite',
+      limit: 20
+    })
+
+    expect(result.scene).toBe('date')
+    expect(result.priceField).toBe('any')
+    expect(result.priceBand).toEqual([5000, 8000])
+    expect(result.rows.length).toBeGreaterThan(0)
+
+    for (const r of result.rows) {
+      // within the station radius
+      expect(r.distance_m).toBeTypeOf('number')
+      expect(r.distance_m!).toBeLessThanOrEqual(1200)
+      // budget filter applied against the any-course price list
+      const anyPrices = JSON.parse(r.course_prices_any_json || '[]') as number[]
+      expect(anyPrices.some(p => p >= 5000 && p <= 8000)).toBe(true)
+    }
 
     db.close()
   }, 60000)

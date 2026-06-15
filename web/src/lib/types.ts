@@ -67,6 +67,9 @@ export type SearchQuery = {
   fts?: string
   priceMin?: number
   priceMax?: number
+  // どの価格帯フィールドで絞り込むか。'drink'=飲み放題付きコース（接待向け）、
+  // 'any'=全コース（デート向け、飲み放題不問）。既定は 'drink'。
+  priceField?: 'drink' | 'any'
   smoking?: 'any' | 'allowed' | 'partial_ok'
   fullyPrivate?: boolean
   midRoom?: boolean

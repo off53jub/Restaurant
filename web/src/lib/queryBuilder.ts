@@ -131,6 +131,7 @@ export function getReviewsByShopId(db: Database, shopId: string, limit = 50): Re
 export type SearchResult = {
   rows: ShopRowWithDistance[]
   priceBand: [number, number] | null
+  priceField: 'drink' | 'any'
   scene: SceneName | null
   origin: { lat: number; lng: number } | null
 }
@@ -140,6 +141,9 @@ export function searchShops(db: Database, q: SearchQuery): SearchResult {
   const preset = q.preset ? PRESETS[q.preset] : undefined
   const scene: SceneName | null = q.scene ?? (preset?.scene as SceneName | undefined) ?? null
   const sortMode = q.sort ?? preset?.sort ?? (scene ? 'composite' : 'atmosphere')
+
+  const priceField: 'drink' | 'any' = q.priceField ?? 'drink'
+  const priceColumn = priceField === 'any' ? 'course_prices_any_json' : 'drink_course_prices_json'
 
   let whereSql = built.where.join(' AND ') || '1=1'
   let ftsJoin = ''
@@ -154,7 +158,7 @@ export function searchShops(db: Database, q: SearchQuery): SearchResult {
   if (built.hasPrice && built.priceBand) {
     const [pmin, pmax] = built.priceBand
     priceJoin =
-      ' AND EXISTS (SELECT 1 FROM json_each(j.drink_course_prices_json) je ' +
+      ` AND EXISTS (SELECT 1 FROM json_each(j.${priceColumn}) je ` +
       `WHERE CAST(je.value AS INTEGER) BETWEEN ${pmin} AND ${pmax})`
   }
 
@@ -198,11 +202,11 @@ export function searchShops(db: Database, q: SearchQuery): SearchResult {
 
   if (sortMode === 'composite' && scene) {
     const band = built.priceBand ?? undefined
-    workingRows.sort((a, b) => {
-      const pa = JSON.parse(a.drink_course_prices_json || '[]') as number[]
-      const pb = JSON.parse(b.drink_course_prices_json || '[]') as number[]
-      return compositeScore(b, pb, scene, band) - compositeScore(a, pa, scene, band)
-    })
+    const pricesOf = (r: ShopRowWithDistance): number[] =>
+      JSON.parse((priceField === 'any' ? r.course_prices_any_json : r.drink_course_prices_json) || '[]')
+    workingRows.sort((a, b) =>
+      compositeScore(b, pricesOf(b), scene, band) - compositeScore(a, pricesOf(a), scene, band)
+    )
   } else if (sortMode === 'distance' && q.near) {
     workingRows.sort((a, b) => (a.distance_m ?? Infinity) - (b.distance_m ?? Infinity))
   } else if (sortMode === 'atmosphere') {
@@ -229,6 +233,7 @@ export function searchShops(db: Database, q: SearchQuery): SearchResult {
   return {
     rows: workingRows.slice(0, limit),
     priceBand: built.priceBand,
+    priceField,
     scene,
     origin: q.near ? { lat: q.near.lat, lng: q.near.lng } : null
   }

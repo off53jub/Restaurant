@@ -10,6 +10,7 @@ type Props = {
   shop: ShopRowWithDistance
   scene: SceneName | null
   priceBand: [number, number] | null
+  priceField?: 'drink' | 'any'
   rank: number
 }
 
@@ -36,8 +37,9 @@ function mapsHref(shop: ShopRowWithDistance): string | null {
   return null
 }
 
-export function ShopCard({ shop, scene, priceBand, rank }: Props) {
-  const prices: number[] = JSON.parse(shop.drink_course_prices_json ?? '[]')
+export function ShopCard({ shop, scene, priceBand, priceField = 'drink', rank }: Props) {
+  const priceJson = priceField === 'any' ? shop.course_prices_any_json : shop.drink_course_prices_json
+  const prices: number[] = JSON.parse(priceJson ?? '[]')
   const igHits: string[] = JSON.parse(shop.instagram_hits_json ?? '[]')
   const fit = scene
     ? compositeScore(shop, prices, scene, priceBand ?? undefined)
@@ -113,7 +115,7 @@ export function ShopCard({ shop, scene, priceBand, rank }: Props) {
             <dd className="font-mono text-neutral-300">{bar(shop.atmosphere_special)} {shop.atmosphere_special ?? '?'}/100</dd>
             {bandPrices.length > 0 && (
               <>
-                <dt className="text-neutral-500">★該当帯</dt>
+                <dt className="text-neutral-500">★該当{priceField === 'any' ? 'コース' : '飲放題'}</dt>
                 <dd className="text-amber-300">{bandPrices.map(p => `${p.toLocaleString()}円`).join(' / ')}</dd>
               </>
             )}

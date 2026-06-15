@@ -142,6 +142,7 @@ export function Near() {
                   rank={i + 1}
                   scene={result.scene}
                   priceBand={result.priceBand}
+                  priceField={result.priceField}
                 />
               </div>
             ))}
