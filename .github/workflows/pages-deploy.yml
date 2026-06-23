@@ -36,30 +36,11 @@ jobs:
         working-directory: web
         run: npm ci
 
-      - name: Verify secret is configured
-        env:
-          TOKEN: ${{ secrets.PAGES_APP_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::Repository secret PAGES_APP_TOKEN is not set."
-            echo "Add it under Settings -> Secrets and variables -> Actions."
-            exit 1
-          fi
-
-      - name: Build (token-gated DB URL)
+      - name: Build
         working-directory: web
         env:
           VITE_DB_VERSION: ${{ github.sha }}
-          VITE_APP_TOKEN: ${{ secrets.PAGES_APP_TOKEN }}
-          VITE_DB_URL: ./shops-web-${{ secrets.PAGES_APP_TOKEN }}.db.gz
         run: npm run build
-
-      - name: Rename DB to token-bearing filename
-        env:
-          TOKEN: ${{ secrets.PAGES_APP_TOKEN }}
-        run: |
-          mv "web/dist/shops-web.db.gz" "web/dist/shops-web-${TOKEN}.db.gz"
-          ls -la web/dist/shops-web-*.db.gz
 
       - name: Inject 404 fallback for SPA routing
         run: cp web/dist/index.html web/dist/404.html

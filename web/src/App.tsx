@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { BrowserRouter, HashRouter, Route, Routes } from 'react-router-dom'
 import type { Database } from 'sql.js'
-import { ensureToken } from './lib/auth'
 import { loadDb, type LoadProgress } from './lib/dbLoader'
 import { DB_SOURCE } from './lib/config'
 import { Home } from './routes/Home'
@@ -44,12 +43,10 @@ function ProgressView({ progress }: { progress: LoadProgress | null }) {
 }
 
 export default function App() {
-  const [authState] = useState(() => ensureToken())
   const [db, setDb] = useState<Database | null>(null)
   const [progress, setProgress] = useState<LoadProgress | null>(null)
 
   useEffect(() => {
-    if (!authState.ok) return
     let cancelled = false
     loadDb(DB_SOURCE, p => {
       if (!cancelled) setProgress(p)
@@ -61,20 +58,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [authState.ok])
-
-  if (!authState.ok) {
-    return (
-      <div className="h-full flex items-center justify-center p-6">
-        <div className="text-center">
-          <div className="text-2xl font-bold mb-2">Unauthorized</div>
-          <p className="text-sm text-neutral-500">
-            ?token=... 付きのURLからアクセスしてください
-          </p>
-        </div>
-      </div>
-    )
-  }
+  }, [])
 
   if (!db) {
     return (
