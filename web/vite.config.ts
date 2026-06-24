@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icons/192.png', 'icons/512.png', 'robots.txt'],
+      includeAssets: ['icons/192.png', 'icons/512.png', 'icons/apple-touch-icon.png', 'icons/favicon-64.png', 'robots.txt'],
       manifest: {
         name: '外食メモ',
         short_name: '外食',
