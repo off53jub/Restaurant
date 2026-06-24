@@ -1,0 +1,165 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import type { SceneName } from '../lib/types'
+import { compositeScore } from '../lib/score'
+import type { ShopRowWithDistance } from '../lib/queryBuilder'
+import { formatDistance, estimateWalkMinutes } from '../lib/geo'
+import { isOpenAt, parseOpeningHours } from '../lib/openHours'
+
+type Props = {
+  shop: ShopRowWithDistance
+  scene: SceneName | null
+  priceBand: [number, number] | null
+  priceField?: 'drink' | 'any'
+  rank: number
+}
+
+function bar(v: number | null): string {
+  if (v == null) return 'データなし'
+  const filled = Math.floor(v / 10)
+  return '█'.repeat(filled) + '░'.repeat(10 - filled)
+}
+
+function smokingLabel(s: ShopRowWithDistance['smoking_at_seat']): string {
+  switch (s) {
+    case 'allowed': return '○ 喫煙可'
+    case 'partial': return '△ 分煙'
+    case 'forbidden': return '× 全面禁煙'
+    default: return '? 記載なし'
+  }
+}
+
+function mapsHref(shop: ShopRowWithDistance): string | null {
+  if (shop.lat != null && shop.lng != null) {
+    return `https://www.google.com/maps/search/?api=1&query=${shop.lat},${shop.lng}`
+  }
+  if (shop.address) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shop.address)}`
+  return null
+}
+
+export function ShopCard({ shop, scene, priceBand, priceField = 'drink', rank }: Props) {
+  const priceJson = priceField === 'any' ? shop.course_prices_any_json : shop.drink_course_prices_json
+  const prices: number[] = JSON.parse(priceJson ?? '[]')
+  const igHits: string[] = JSON.parse(shop.instagram_hits_json ?? '[]')
+  const fit = scene
+    ? compositeScore(shop, prices, scene, priceBand ?? undefined)
+    : null
+  const bandPrices = priceBand
+    ? prices.filter(p => p >= priceBand[0] && p <= priceBand[1])
+    : []
+  const oh = parseOpeningHours(shop.opening_hours_json)
+  const openStatus = oh ? isOpenAt(oh, new Date().getHours()) : { state: 'unknown' as const }
+
+  const photoSrc = shop.photo_url_l ?? shop.photo_url_s ?? shop.social_og_image ?? null
+  const [photoBroken, setPhotoBroken] = useState(false)
+
+  const maps = mapsHref(shop)
+
+  return (
+    <article className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden">
+      <Link to={`/shop/${shop.id}`} className="block active:bg-neutral-800/50">
+        {photoSrc && !photoBroken && (
+          <img
+            src={photoSrc}
+            alt={shop.name}
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+            onError={() => setPhotoBroken(true)}
+            className="w-full h-40 object-cover bg-neutral-800"
+          />
+        )}
+
+        <div className="p-4 space-y-2">
+          <header className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-xs text-neutral-500 flex items-center gap-2 flex-wrap">
+                <span>#{rank}</span>
+                {shop.distance_m != null && (
+                  <span className="text-sky-300">
+                    {formatDistance(shop.distance_m)} (徒歩{estimateWalkMinutes(shop.distance_m)}分)
+                  </span>
+                )}
+                {openStatus.state === 'open' && (
+                  <span className="text-emerald-400">● 営業中{openStatus.until ? ` (〜${openStatus.until}時)` : ''}</span>
+                )}
+                {openStatus.state === 'closed' && <span className="text-neutral-500">○ 営業時間外</span>}
+              </div>
+              <h3 className="text-base font-semibold truncate">{shop.name}</h3>
+              <div className="text-xs text-neutral-400">{shop.genre_name}</div>
+            </div>
+            {fit !== null && (
+              <div className="text-right shrink-0">
+                <div className="text-2xl font-bold text-amber-400">{fit}</div>
+                <div className="text-[10px] text-neutral-500">適合度/100</div>
+              </div>
+            )}
+          </header>
+
+          {shop.catch && (
+            <p className="text-xs text-neutral-300 line-clamp-2">{shop.catch}</p>
+          )}
+
+          <dl className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1 text-xs">
+            <dt className="text-neutral-500">住所</dt>
+            <dd className="text-neutral-200">{shop.address}</dd>
+            {shop.access && (
+              <>
+                <dt className="text-neutral-500">アクセス</dt>
+                <dd className="text-neutral-200 line-clamp-1">{shop.access}</dd>
+              </>
+            )}
+            <dt className="text-neutral-500">落ち着き</dt>
+            <dd className="font-mono text-neutral-300">{bar(shop.atmosphere_calm)} {shop.atmosphere_calm ?? '?'}/100</dd>
+            <dt className="text-neutral-500">特別感</dt>
+            <dd className="font-mono text-neutral-300">{bar(shop.atmosphere_special)} {shop.atmosphere_special ?? '?'}/100</dd>
+            {bandPrices.length > 0 && (
+              <>
+                <dt className="text-neutral-500">★該当{priceField === 'any' ? 'コース' : '飲放題'}</dt>
+                <dd className="text-amber-300">{bandPrices.map(p => `${p.toLocaleString()}円`).join(' / ')}</dd>
+              </>
+            )}
+            <dt className="text-neutral-500">個室</dt>
+            <dd>
+              完全{shop.fully_private_room ? '○' : '?'} / 5-8名{shop.mid_room_ok ? '○' : '?'}
+            </dd>
+            <dt className="text-neutral-500">喫煙</dt>
+            <dd>{smokingLabel(shop.smoking_at_seat)}</dd>
+            {igHits.length > 0 && (
+              <>
+                <dt className="text-neutral-500">映え</dt>
+                <dd className="text-neutral-300">{igHits.slice(0, 4).join('・')}</dd>
+              </>
+            )}
+          </dl>
+        </div>
+      </Link>
+
+      <div className="px-4 pb-4 flex items-center gap-3 text-xs flex-wrap">
+        {shop.pc_url && (
+          <a href={shop.pc_url} target="_blank" rel="noopener noreferrer" className="text-sky-400 underline">
+            HotPepper
+          </a>
+        )}
+        {maps && (
+          <a href={maps} target="_blank" rel="noopener noreferrer" className="text-sky-400 underline">
+            地図/経路
+          </a>
+        )}
+        {shop.social_instagram && (
+          <a href={shop.social_instagram} target="_blank" rel="noopener noreferrer" className="text-pink-300 underline">
+            Instagram
+          </a>
+        )}
+        {shop.social_tiktok && (
+          <a href={shop.social_tiktok} target="_blank" rel="noopener noreferrer" className="text-neutral-200 underline">
+            TikTok
+          </a>
+        )}
+        <Link to={`/shop/${shop.id}`} className="text-amber-300 underline ml-auto">
+          詳細 →
+        </Link>
+      </div>
+    </article>
+  )
+}

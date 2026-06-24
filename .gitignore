@@ -6,3 +6,7 @@ __pycache__/
 venv/
 *.json.bak
 output/
+db/
+*.db
+*.db-wal
+*.db-shm

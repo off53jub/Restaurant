@@ -1,0 +1,69 @@
+name: Monthly DB refresh
+
+# 月次でDBを再構築するクラウド版cron。
+# Release アセット db-snapshot/shops.db.gz を読み書きすることで永続化する。
+
+on:
+  schedule:
+    - cron: "0 19 1 * *"   # 毎月1日 04:00 JST (= 前日19:00 UTC)
+  workflow_dispatch: {}      # 手動実行も可
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350     # ハードリミット6h（=360分）内に収める
+    permissions:
+      contents: write        # release create/upload に必要
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      # 前回のRelease DBを復元。無ければ新規構築。
+      - name: Restore previous DB from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p db
+          if gh release view db-snapshot >/dev/null 2>&1; then
+            gh release download db-snapshot --pattern shops.db.gz --dir db
+            gunzip -f db/shops.db.gz
+            echo "Restored db/shops.db ($(du -h db/shops.db | cut -f1))"
+          else
+            echo "No db-snapshot release found; will build from scratch."
+          fi
+
+      - name: Ingest (23 wards)
+        env:
+          HOTPEPPER_API_KEY: ${{ secrets.HOTPEPPER_API_KEY }}
+        run: .venv/bin/python ingest.py --db db/shops.db
+
+      - name: Enrich (new + stale only)
+        env:
+          HOTPEPPER_API_KEY: ${{ secrets.HOTPEPPER_API_KEY }}
+        run: .venv/bin/python enrich_db.py --db db/shops.db --concurrency 12 --delay 0.3
+
+      - name: Compact and compress DB
+        run: |
+          .venv/bin/python -c "import sqlite3; c=sqlite3.connect('db/shops.db'); c.execute('VACUUM'); c.close()"
+          gzip -9 -kf db/shops.db
+          du -h db/shops.db db/shops.db.gz
+
+      - name: Upload DB to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view db-snapshot >/dev/null 2>&1; then
+            gh release upload db-snapshot db/shops.db.gz --clobber
+          else
+            gh release create db-snapshot db/shops.db.gz \
+              --title "DB snapshot" \
+              --notes "23区レストランDB（gzip圧縮）。月次自動更新。"
+          fi

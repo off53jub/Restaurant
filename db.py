@@ -1,0 +1,240 @@
+"""SQLite DB schema for the Tokyo 23-ward restaurant DB."""
+import sqlite3
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS shops (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    name_kana TEXT,
+    address TEXT,
+    station_name TEXT,
+    lat REAL,
+    lng REAL,
+    genre_name TEXT,
+    budget_name TEXT,
+    access TEXT,
+    pc_url TEXT,
+    private_room TEXT,
+    free_drink TEXT,
+    non_smoking TEXT,
+    course TEXT,
+    catch TEXT,
+    capacity TEXT,
+    party_capacity TEXT,
+    raw_json TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'hotpepper',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS shops_address ON shops(address);
+CREATE INDEX IF NOT EXISTS shops_genre ON shops(genre_name);
+CREATE INDEX IF NOT EXISTS shops_last_seen ON shops(last_seen_at);
+
+CREATE TABLE IF NOT EXISTS judgements (
+    shop_id TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+    drink_course_min_yen INTEGER,
+    drink_course_prices_json TEXT,
+    course_min_yen_any INTEGER,
+    course_prices_any_json TEXT,
+    fully_private_room INTEGER,
+    smoking_at_seat TEXT,
+    smoking_evidence TEXT,
+    private_evidence TEXT,
+    kaishoku_score INTEGER NOT NULL DEFAULT 0,
+    kaishoku_hits_json TEXT,
+    mid_room_ok INTEGER,
+    mid_room_evidence TEXT,
+    atmosphere_calm INTEGER,
+    atmosphere_special INTEGER,
+    instagram_score INTEGER NOT NULL DEFAULT 0,
+    instagram_hits_json TEXT,
+    shop_description TEXT,
+    fetch_error TEXT,
+    enriched_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS j_price ON judgements(drink_course_min_yen);
+CREATE INDEX IF NOT EXISTS j_calm ON judgements(atmosphere_calm);
+CREATE INDEX IF NOT EXISTS j_ig ON judgements(instagram_score);
+CREATE INDEX IF NOT EXISTS j_enriched ON judgements(enriched_at);
+
+CREATE TABLE IF NOT EXISTS ingest_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    new_shops INTEGER NOT NULL DEFAULT 0,
+    updated_shops INTEGER NOT NULL DEFAULT 0,
+    centers INTEGER NOT NULL DEFAULT 0
+);
+
+-- Wikidata/Wikipedia から補完した店情報（老舗・有名店向け、任意機能）。
+CREATE TABLE IF NOT EXISTS wiki (
+    shop_id TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+    wikidata_id TEXT,
+    label TEXT,
+    description TEXT,
+    wikipedia_ja_url TEXT,
+    summary TEXT,
+    fetched_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS wiki_wikidata ON wiki(wikidata_id);
+
+-- Google Places API で取得した店舗評価（任意機能）。
+-- API キー入手後 google_enrich.py で必要分だけ取得・キャッシュ。
+CREATE TABLE IF NOT EXISTS google (
+    shop_id TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+    place_id TEXT,
+    rating REAL,                       -- 0.0-5.0
+    user_ratings_total INTEGER,
+    price_level INTEGER,               -- 0(無料)-4(高級)
+    business_status TEXT,              -- OPERATIONAL/CLOSED_TEMPORARILY 等
+    types_json TEXT,                   -- 店舗タイプ配列
+    fetched_at TEXT NOT NULL,
+    fetch_error TEXT
+);
+CREATE INDEX IF NOT EXISTS google_rating ON google(rating);
+CREATE INDEX IF NOT EXISTS google_reviews ON google(user_ratings_total);
+
+-- Google Places API 等で取得した口コミ。1店舗に複数行。
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+    source TEXT NOT NULL DEFAULT 'google',
+    author TEXT,
+    rating REAL,
+    text TEXT,
+    language TEXT,
+    relative_time TEXT,                -- "2 months ago" 等
+    publish_time TEXT,                 -- ISO8601 (あれば)
+    fetched_at TEXT NOT NULL,
+    UNIQUE(shop_id, source, author, text)
+);
+CREATE INDEX IF NOT EXISTS reviews_shop_id ON reviews(shop_id);
+CREATE INDEX IF NOT EXISTS reviews_rating ON reviews(rating);
+
+-- 公式サイトから抽出した SNS アカウントと OG メタ情報（任意機能）。
+-- enrich_social.py で OSMの website / HPの公式リンクから取得・キャッシュ。
+CREATE TABLE IF NOT EXISTS social (
+    shop_id TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+    instagram_url TEXT,
+    tiktok_url TEXT,
+    facebook_url TEXT,
+    twitter_url TEXT,
+    line_url TEXT,
+    youtube_url TEXT,
+    og_title TEXT,
+    og_description TEXT,
+    og_image TEXT,
+    final_url TEXT,                  -- 最終リダイレクト先（短縮URL展開後）
+    fetched_at TEXT NOT NULL,
+    fetch_error TEXT
+);
+CREATE INDEX IF NOT EXISTS social_instagram ON social(instagram_url);
+CREATE INDEX IF NOT EXISTS social_tiktok ON social(tiktok_url);
+
+-- 自分の訪問記録。shop_id がNULLならDB外の店(都外/ミシュラン等)を手入力で扱う。
+CREATE TABLE IF NOT EXISTS visits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_id TEXT REFERENCES shops(id) ON DELETE SET NULL,
+    manual_name TEXT,
+    manual_address TEXT,
+    manual_url TEXT,
+    visited_at TEXT NOT NULL,            -- 'YYYY-MM-DD'
+    rating INTEGER,                      -- 1-5
+    cost_per_person INTEGER,             -- 円
+    scene TEXT,                          -- kaishoku/date/family/business 等
+    companions TEXT,                     -- フリーテキスト（同席者・人数）
+    course_name TEXT,                    -- 例: 'おまかせコース 8800円'
+    private_room INTEGER,                -- 0/1: 個室だったか
+    would_revisit INTEGER,               -- 0/1: また来たい
+    notes TEXT,
+    tags TEXT,                           -- 'カウンター,日本酒充実' カンマ区切り
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (shop_id IS NOT NULL OR manual_name IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS visits_shop_id ON visits(shop_id);
+CREATE INDEX IF NOT EXISTS visits_visited_at ON visits(visited_at);
+CREATE INDEX IF NOT EXISTS visits_rating ON visits(rating);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS shops_fts USING fts5(
+    name, name_kana, address, access, catch,
+    content='shops', content_rowid='rowid'
+);
+
+CREATE TRIGGER IF NOT EXISTS shops_ai AFTER INSERT ON shops BEGIN
+  INSERT INTO shops_fts(rowid, name, name_kana, address, access, catch)
+  VALUES (new.rowid, new.name, new.name_kana, new.address, new.access, new.catch);
+END;
+CREATE TRIGGER IF NOT EXISTS shops_ad AFTER DELETE ON shops BEGIN
+  INSERT INTO shops_fts(shops_fts, rowid, name, name_kana, address, access, catch)
+  VALUES('delete', old.rowid, old.name, old.name_kana, old.address, old.access, old.catch);
+END;
+CREATE TRIGGER IF NOT EXISTS shops_au AFTER UPDATE ON shops BEGIN
+  INSERT INTO shops_fts(shops_fts, rowid, name, name_kana, address, access, catch)
+  VALUES('delete', old.rowid, old.name, old.name_kana, old.address, old.access, old.catch);
+  INSERT INTO shops_fts(rowid, name, name_kana, address, access, catch)
+  VALUES (new.rowid, new.name, new.name_kana, new.address, new.access, new.catch);
+END;
+"""
+
+
+def connect(path):
+    conn = sqlite3.connect(path, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def migrate(conn):
+    """既存DBに対する非破壊マイグレーション。新規列の追加など。"""
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(shops)").fetchall()]
+    if "source" not in cols:
+        # 既存行は HotPepper 由来とみなす
+        conn.execute("ALTER TABLE shops ADD COLUMN source TEXT NOT NULL DEFAULT 'hotpepper'")
+    # source 列確定後にインデックス作成
+    conn.execute("CREATE INDEX IF NOT EXISTS shops_source ON shops(source)")
+    # judgements に後付け列を追加（既存DB向け）
+    jcols = [r["name"] for r in conn.execute("PRAGMA table_info(judgements)").fetchall()]
+    if jcols:
+        for col, decl in [
+            ("shop_description", "TEXT"),
+            ("hotpepper_review_count", "INTEGER"),
+            ("hotpepper_review_scenes", "TEXT"),
+            ("hp_review_fetched_at", "TEXT"),
+            ("youtube_video_count", "INTEGER"),
+            ("youtube_top_views", "INTEGER"),
+            ("youtube_fetched_at", "TEXT"),
+            ("ward", "TEXT"),                          # 逆ジオコーディング結果
+            ("amenities_json", "TEXT"),                # G4: 設備情報
+            ("elevation_m", "REAL"),                   # G8: 標高
+            ("photo_food_count", "INTEGER"),           # G3: 料理写真数
+            ("photo_interior_count", "INTEGER"),       # G3: 内装写真数
+            ("hp_photo_fetched_at", "TEXT"),
+            ("corp_number", "TEXT"),                   # G2: 法人番号
+            ("corp_kind", "TEXT"),                     # 個人/株式会社/etc
+            ("corp_fetched_at", "TEXT"),
+            ("jsonld_json", "TEXT"),                   # G5: schema.org
+            ("foursquare_id", "TEXT"),                 # G1
+            ("foursquare_popularity", "REAL"),
+            ("foursquare_fetched_at", "TEXT"),
+            ("bluesky_mention_count", "INTEGER"),      # G7
+            ("bluesky_fetched_at", "TEXT"),
+            ("opening_hours_json", "TEXT"),            # H2: 営業時間構造化
+            ("wayback_first_year", "INTEGER"),         # H1: 営業歴
+            ("wayback_last_year", "INTEGER"),
+            ("wayback_snapshot_count", "INTEGER"),
+            ("wayback_fetched_at", "TEXT"),
+        ]:
+            if col not in jcols:
+                conn.execute(f"ALTER TABLE judgements ADD COLUMN {col} {decl}")
+    conn.commit()
+
+
+def init_db(path):
+    conn = connect(path)
+    conn.executescript(SCHEMA)
+    migrate(conn)
+    conn.commit()
+    return conn
